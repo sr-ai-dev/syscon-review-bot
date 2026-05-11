@@ -48,12 +48,15 @@ async def main() -> int:
 
     token = os.environ["GITHUB_TOKEN"]
     openai_key = os.environ["OPENAI_API_KEY"]
-    model_default = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
+    model_env = os.environ.get("OPENAI_MODEL")
     model_override = os.environ.get("REVIEW_MODEL_OVERRIDE") or None
     config_path = os.environ.get("REVIEW_CONFIG_PATH", ".github/review-bot.yml")
 
     github_client = GitHubClient(token=token)
-    gpt_client = GPTClient(api_key=openai_key, model=model_default)
+    if model_env:
+        gpt_client = GPTClient(api_key=openai_key, model=model_env)
+    else:
+        gpt_client = GPTClient(api_key=openai_key)
 
     try:
         await review_pr(
