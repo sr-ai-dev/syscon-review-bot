@@ -1,3 +1,5 @@
+import logging
+
 import yaml
 
 from src.models.config import (
@@ -8,6 +10,8 @@ from src.models.config import (
 )
 
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CONFIG = ReviewConfig()
 
 
@@ -17,6 +21,7 @@ def load_config_from_yaml(yaml_content: str) -> ReviewConfig:
 
     data = yaml.safe_load(yaml_content)
     if not data:
+        logger.warning("Config YAML parses to empty/None — using defaults")
         return DEFAULT_CONFIG
 
     review_section = data.get("review", {})
