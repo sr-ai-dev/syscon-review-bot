@@ -1,0 +1,47 @@
+name: 'Syscon AI Code Review'
+description: 'Auto code review on PRs using OpenAI GPT — multi-language support'
+author: 'kj-choi-syscon'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  openai-key:
+    description: 'OpenAI API key'
+    required: true
+  github-token:
+    description: 'GitHub token for posting reviews'
+    required: false
+    default: ${{ github.token }}
+  model:
+    description: 'OpenAI model ID (overrides config and OPENAI_MODEL env)'
+    required: false
+    default: ''
+  config-path:
+    description: 'Path to review config in target repo'
+    required: false
+    default: '.github/review-bot.yml'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: ${{ github.action_path }}/requirements.txt
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r ${{ github.action_path }}/requirements.txt
+
+    - name: Run review
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REVIEW_MODEL_OVERRIDE: ${{ inputs.model }}
+        REVIEW_CONFIG_PATH: ${{ inputs.config-path }}
+        PYTHONPATH: ${{ github.action_path }}
+      run: python ${{ github.action_path }}/src/cli.py
