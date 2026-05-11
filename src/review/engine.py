@@ -45,6 +45,8 @@ async def review_pr(
     logger.info(f"Reviewing {context.repo}#{context.pr_number}")
 
     pr_info = await get_pr_info(github_client, context.repo, context.pr_number)
+    # Load config from the PR head ref so a PR can iterate on its own review-bot.yml.
+    # Trade-off: a PR can weaken its own rules; reviewers should watch for config changes.
     config = await load_repo_config(
         github_client, context.repo, pr_info["head"]["ref"], config_path
     )
