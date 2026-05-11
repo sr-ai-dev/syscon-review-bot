@@ -1,4 +1,5 @@
 import base64
+from urllib.parse import quote
 
 import httpx
 
@@ -23,7 +24,9 @@ async def get_repo_file(
     ref: str,
 ) -> str | None:
     try:
-        data = await client.get_json(f"/repos/{repo}/contents/{path}?ref={ref}")
+        data = await client.get_json(
+            f"/repos/{repo}/contents/{quote(path, safe='/')}?ref={quote(ref, safe='')}"
+        )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             return None
