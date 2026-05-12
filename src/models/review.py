@@ -22,6 +22,7 @@ class Issue(BaseModel):
 class ReviewResult(BaseModel):
     score: int = Field(ge=1, le=10)
     summary: str
+    score_rationale: str = ""
     decision: Decision
     issues: list[Issue] = Field(default_factory=list)
     good_points: list[str] = Field(default_factory=list)

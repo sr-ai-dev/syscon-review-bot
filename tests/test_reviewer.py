@@ -29,6 +29,25 @@ class TestFormatReviewBody:
         assert "권고" in body
         assert "Good naming" in body
 
+    def test_format_includes_score_rationale_when_present(self):
+        result = ReviewResult(
+            score=8, summary="Good", decision=Decision.APPROVE,
+            score_rationale="critical 0개, warning 0개, minor 2건이라 8점",
+            issues=[], good_points=[],
+        )
+        body = format_review_body(result)
+        assert "critical 0개, warning 0개, minor 2건이라 8점" in body
+        assert body.index("critical 0개") < body.index("Good")
+
+    def test_format_omits_score_rationale_when_empty(self):
+        result = ReviewResult(
+            score=8, summary="Good", decision=Decision.APPROVE,
+            score_rationale="",
+            issues=[], good_points=[],
+        )
+        body = format_review_body(result)
+        assert "점수 근거" not in body
+
     def test_format_approve_only(self):
         result = ReviewResult(
             score=9, summary="Great", decision=Decision.APPROVE,

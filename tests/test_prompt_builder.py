@@ -26,6 +26,10 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt(ReviewConfig(), languages=[])
         assert "json" in prompt.lower()
 
+    def test_includes_score_rationale_in_output_schema(self):
+        prompt = build_system_prompt(ReviewConfig(), languages=[])
+        assert "score_rationale" in prompt
+
     def test_includes_language_section_when_provided(self):
         prompt = build_system_prompt(ReviewConfig(), languages=["Python", "C++"])
         assert "Python" in prompt

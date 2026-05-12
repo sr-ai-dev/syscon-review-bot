@@ -38,6 +38,7 @@ def build_system_prompt(config: ReviewConfig, languages: list[str]) -> str:
 {
   "score": <1-10 정수>,
   "summary": "<전체 요약 1-2문장>",
+  "score_rationale": "<점수 산출 근거 1-2문장. critical/warning/minor 개수와 잘된 점을 어떻게 가중했는지 명시>",
   "decision": "approve | comment | request_changes",
   "issues": [
     {

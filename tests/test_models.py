@@ -40,6 +40,19 @@ class TestReviewResult:
         assert result.score == 8
         assert result.decision == Decision.COMMENT
 
+    def test_score_rationale_field_accepted(self):
+        result = ReviewResult(
+            score=8,
+            summary="ok",
+            decision=Decision.APPROVE,
+            score_rationale="critical 0개, warning 0개라 만점 근처지만 minor 2건이 있어 8점",
+        )
+        assert "minor 2건" in result.score_rationale
+
+    def test_score_rationale_defaults_empty(self):
+        result = ReviewResult(score=8, summary="ok", decision=Decision.APPROVE)
+        assert result.score_rationale == ""
+
     def test_score_must_be_1_to_10(self):
         from pydantic import ValidationError
         import pytest

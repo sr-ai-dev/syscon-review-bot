@@ -39,11 +39,16 @@ def _format_issue_table(issues: list[Issue], header: str) -> list[str]:
 def format_review_body(result: ReviewResult) -> str:
     lines = [
         f"{BOT_REVIEW_MARKER} — 점수: {result.score}/10",
+    ]
+    if result.score_rationale:
+        lines.append("")
+        lines.append(f"> **점수 근거**: {result.score_rationale}")
+    lines.extend([
         "",
         result.summary,
         "",
         "---",
-    ]
+    ])
 
     critical = [i for i in result.issues if i.severity == "critical"]
     warnings = [i for i in result.issues if i.severity == "warning"]
