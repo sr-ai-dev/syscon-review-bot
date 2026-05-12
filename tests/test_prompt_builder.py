@@ -70,3 +70,47 @@ class TestBuildUserPrompt:
             base_branch="main", head_branch="feat",
         )
         assert ("truncated" in prompt.lower() or "요약" in prompt) and len(prompt) < len(large_patch) + 500
+
+    def test_includes_previous_reviews_section(self):
+        files = [FileDiff(path="x.py", patch="+x", additions=1, deletions=0)]
+        prompt = build_user_prompt(
+            files=files,
+            pr_title="T", pr_body="B",
+            base_branch="main", head_branch="feat",
+            previous_reviews=["## 🤖 코드 리뷰 — 점수: 7/10\nfoo"],
+        )
+        assert "이전 리뷰" in prompt
+        assert "점수: 7/10" in prompt
+        assert "일관" in prompt
+
+    def test_omits_previous_reviews_section_when_empty(self):
+        files = [FileDiff(path="x.py", patch="+x", additions=1, deletions=0)]
+        prompt = build_user_prompt(
+            files=files,
+            pr_title="T", pr_body="B",
+            base_branch="main", head_branch="feat",
+            previous_reviews=[],
+        )
+        assert "이전 리뷰" not in prompt
+
+    def test_previous_reviews_default_omitted(self):
+        files = [FileDiff(path="x.py", patch="+x", additions=1, deletions=0)]
+        prompt = build_user_prompt(
+            files=files,
+            pr_title="T", pr_body="B",
+            base_branch="main", head_branch="feat",
+        )
+        assert "이전 리뷰" not in prompt
+
+    def test_includes_multiple_previous_reviews_in_order(self):
+        files = [FileDiff(path="x.py", patch="+x", additions=1, deletions=0)]
+        prompt = build_user_prompt(
+            files=files,
+            pr_title="T", pr_body="B",
+            base_branch="main", head_branch="feat",
+            previous_reviews=[
+                "## 🤖 코드 리뷰 — 점수: 7/10\nfirst",
+                "## 🤖 코드 리뷰 — 점수: 6/10\nsecond",
+            ],
+        )
+        assert prompt.index("first") < prompt.index("second")

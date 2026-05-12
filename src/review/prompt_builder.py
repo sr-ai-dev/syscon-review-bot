@@ -64,6 +64,7 @@ def build_user_prompt(
     pr_body: str,
     base_branch: str,
     head_branch: str,
+    previous_reviews: list[str] | None = None,
 ) -> str:
     parts = [
         "## PR 정보",
@@ -84,5 +85,17 @@ def build_user_prompt(
         else:
             parts.append(f"```diff\n{f.patch}\n```")
         parts.append("")
+
+    if previous_reviews:
+        parts.append("## 이전 리뷰 기록")
+        parts.append(
+            "아래는 이전 커밋에 대해 너가 직접 작성한 리뷰다. "
+            "동일한 PR에 대한 후속 리뷰이므로 일관성을 유지하라: "
+            "이미 지적·대응된 이슈는 재지적하지 말고, 점수/판정 기준도 이전과 크게 어긋나지 않게 하라."
+        )
+        for review in previous_reviews:
+            parts.append("")
+            parts.append("---")
+            parts.append(review)
 
     return "\n".join(parts)

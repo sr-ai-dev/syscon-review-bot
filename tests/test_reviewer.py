@@ -1,7 +1,12 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from src.github.reviewer import format_review_body, submit_review
+from src.github.reviewer import (
+    BOT_REVIEW_MARKER,
+    filter_bot_reviews,
+    format_review_body,
+    submit_review,
+)
 from src.models.review import ReviewResult, Issue, Decision
 
 
@@ -80,6 +85,42 @@ class TestFormatReviewBody:
         body = format_review_body(result)
         row = next(line for line in body.split("\n") if "Line1" in line)
         assert "Line2" in row and "Line3" in row
+
+
+class TestFilterBotReviews:
+    def test_keeps_only_bot_marker_reviews(self):
+        raw = [
+            {"body": f"{BOT_REVIEW_MARKER} — 점수: 7/10\nfoo"},
+            {"body": "looks good to me"},
+            {"body": f"{BOT_REVIEW_MARKER} — 점수: 8/10\nbar"},
+        ]
+        result = filter_bot_reviews(raw)
+        assert len(result) == 2
+        assert all(BOT_REVIEW_MARKER in r["body"] for r in result)
+
+    def test_returns_empty_when_no_bot_reviews(self):
+        raw = [
+            {"body": "looks good"},
+            {"body": "approve"},
+        ]
+        assert filter_bot_reviews(raw) == []
+
+    def test_handles_missing_body_field(self):
+        raw = [
+            {"state": "PENDING"},  # no body
+            {"body": f"{BOT_REVIEW_MARKER} — 점수: 7/10"},
+        ]
+        result = filter_bot_reviews(raw)
+        assert len(result) == 1
+
+    def test_marker_matches_real_review_output(self):
+        """filter must accept the body produced by format_review_body."""
+        result = ReviewResult(
+            score=7, summary="ok", decision=Decision.COMMENT,
+            issues=[], good_points=[],
+        )
+        body = format_review_body(result)
+        assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
 
 
 class TestSubmitReview:

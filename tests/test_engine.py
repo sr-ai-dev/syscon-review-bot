@@ -21,16 +21,32 @@ def good_review():
     )
 
 
+def make_get_json_dispatch(
+    pr_info: dict | None = None,
+    reviews: list[dict] | None = None,
+):
+    """Dispatch get_json calls by path: /reviews → reviews list, else PR info."""
+    pr_info = pr_info or {
+        "title": "T", "body": "B",
+        "head": {"ref": "feat"}, "base": {"ref": "main"},
+    }
+    reviews = reviews or []
+
+    async def dispatch(path):
+        if path.endswith("/reviews"):
+            return reviews
+        return pr_info
+
+    return dispatch
+
+
 @pytest.mark.asyncio
 async def test_review_pr_full_flow(context, good_review):
     mock_github = AsyncMock()
     mock_github.get.return_value = (
         "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n+hello"
     )
-    mock_github.get_json.return_value = {
-        "title": "T", "body": "B",
-        "head": {"ref": "feat"}, "base": {"ref": "main"},
-    }
+    mock_github.get_json.side_effect = make_get_json_dispatch()
     mock_github.post = AsyncMock(return_value={"id": 1})
 
     mock_gpt = AsyncMock()
@@ -51,10 +67,9 @@ async def test_review_pr_full_flow(context, good_review):
 async def test_review_pr_skips_empty_diff(context):
     mock_github = AsyncMock()
     mock_github.get.return_value = ""
-    mock_github.get_json.return_value = {
-        "title": "T", "body": "B",
-        "head": {"ref": "f"}, "base": {"ref": "m"},
-    }
+    mock_github.get_json.side_effect = make_get_json_dispatch(
+        pr_info={"title": "T", "body": "B", "head": {"ref": "f"}, "base": {"ref": "m"}},
+    )
     mock_gpt = AsyncMock()
 
     with patch(
@@ -77,10 +92,9 @@ async def test_review_pr_overrides_gpt_decision(context):
     )
     mock_github = AsyncMock()
     mock_github.get.return_value = "diff --git a/x.py b/x.py\n@@ -1 +1 @@\n+hi"
-    mock_github.get_json.return_value = {
-        "title": "T", "body": "B",
-        "head": {"ref": "f"}, "base": {"ref": "m"},
-    }
+    mock_github.get_json.side_effect = make_get_json_dispatch(
+        pr_info={"title": "T", "body": "B", "head": {"ref": "f"}, "base": {"ref": "m"}},
+    )
     mock_github.post = AsyncMock(return_value={"id": 1})
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = gpt_result
@@ -96,13 +110,61 @@ async def test_review_pr_overrides_gpt_decision(context):
 
 
 @pytest.mark.asyncio
+async def test_review_pr_includes_previous_bot_reviews_in_prompt(context, good_review):
+    bot_body = "## 🤖 코드 리뷰 — 점수: 7/10\n이전지적사항"
+    human_body = "human reviewer comment"
+
+    mock_github = AsyncMock()
+    mock_github.get.return_value = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x"
+    mock_github.get_json.side_effect = make_get_json_dispatch(
+        reviews=[
+            {"body": bot_body, "user": {"login": "github-actions[bot]"}},
+            {"body": human_body, "user": {"login": "alice"}},
+        ],
+    )
+    mock_github.post = AsyncMock(return_value={"id": 1})
+
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = good_review
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(),
+    ):
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    user_prompt = mock_gpt.review.call_args.args[1]
+    assert "이전지적사항" in user_prompt
+    assert human_body not in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_review_pr_handles_no_previous_reviews(context, good_review):
+    mock_github = AsyncMock()
+    mock_github.get.return_value = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x"
+    mock_github.get_json.side_effect = make_get_json_dispatch(reviews=[])
+    mock_github.post = AsyncMock(return_value={"id": 1})
+
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = good_review
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(),
+    ):
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    user_prompt = mock_gpt.review.call_args.args[1]
+    assert "이전 리뷰" not in user_prompt
+
+
+@pytest.mark.asyncio
 async def test_review_pr_uses_config_model(context, good_review):
     mock_github = AsyncMock()
     mock_github.get.return_value = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x"
-    mock_github.get_json.return_value = {
-        "title": "T", "body": "B",
-        "head": {"ref": "f"}, "base": {"ref": "m"},
-    }
+    mock_github.get_json.side_effect = make_get_json_dispatch(
+        pr_info={"title": "T", "body": "B", "head": {"ref": "f"}, "base": {"ref": "m"}},
+    )
     mock_github.post = AsyncMock(return_value={"id": 1})
 
     mock_gpt = AsyncMock()

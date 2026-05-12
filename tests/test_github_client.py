@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from src.github.client import GitHubClient
-from src.github.pr import get_pr_diff, get_pr_info, get_repo_file
+from src.github.pr import get_pr_diff, get_pr_info, get_pr_reviews, get_repo_file
 
 
 class TestGitHubClient:
@@ -45,6 +45,25 @@ class TestGitHubClient:
             content = await get_repo_file(client, "owner/repo", "config.yml", "main")
 
         assert content == "hello"
+
+    @pytest.mark.asyncio
+    async def test_get_pr_reviews_returns_list(self, client):
+        with patch.object(
+            client, "get_json", new_callable=AsyncMock,
+            return_value=[
+                {
+                    "body": "## 🤖 코드 리뷰 — 점수: 7/10\n...",
+                    "state": "COMMENTED",
+                    "submitted_at": "2026-05-11T11:20:26Z",
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        ) as mock_get_json:
+            reviews = await get_pr_reviews(client, "owner/repo", 42)
+
+        assert len(reviews) == 1
+        assert reviews[0]["body"].startswith("## 🤖")
+        assert "/repos/owner/repo/pulls/42/reviews" in mock_get_json.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_get_repo_file_404_returns_none(self, client):

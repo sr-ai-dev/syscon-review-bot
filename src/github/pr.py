@@ -17,6 +17,10 @@ async def get_pr_info(client: GitHubClient, repo: str, pr_number: int) -> dict:
     return await client.get_json(f"/repos/{repo}/pulls/{pr_number}")
 
 
+async def get_pr_reviews(client: GitHubClient, repo: str, pr_number: int) -> list[dict]:
+    return await client.get_json(f"/repos/{repo}/pulls/{pr_number}/reviews")
+
+
 async def get_repo_file(
     client: GitHubClient,
     repo: str,

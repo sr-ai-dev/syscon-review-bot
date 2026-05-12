@@ -2,6 +2,13 @@ from src.github.client import GitHubClient
 from src.models.review import Decision, Issue, ReviewResult
 
 
+BOT_REVIEW_MARKER = "## 🤖 코드 리뷰"
+
+
+def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
+    return [r for r in reviews if BOT_REVIEW_MARKER in (r.get("body") or "")]
+
+
 def _escape_table_cell(text: str | None) -> str:
     if not text:
         return ""
@@ -31,7 +38,7 @@ def _format_issue_table(issues: list[Issue], header: str) -> list[str]:
 
 def format_review_body(result: ReviewResult) -> str:
     lines = [
-        f"## 🤖 코드 리뷰 — 점수: {result.score}/10",
+        f"{BOT_REVIEW_MARKER} — 점수: {result.score}/10",
         "",
         result.summary,
         "",

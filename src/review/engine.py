@@ -2,8 +2,8 @@ import logging
 from dataclasses import dataclass
 
 from src.github.client import GitHubClient
-from src.github.pr import get_pr_diff, get_pr_info, get_repo_file
-from src.github.reviewer import submit_review
+from src.github.pr import get_pr_diff, get_pr_info, get_pr_reviews, get_repo_file
+from src.github.reviewer import filter_bot_reviews, submit_review
 from src.models.config import ReviewConfig
 from src.review.decision import compute_decision
 from src.review.diff_parser import filter_files, parse_diff
@@ -62,6 +62,9 @@ async def review_pr(
         logger.info("All files filtered out")
         return
 
+    raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
+    previous_reviews = [r["body"] for r in filter_bot_reviews(raw_reviews)]
+
     languages = detect_languages(filtered)
     system_prompt = build_system_prompt(config, languages)
     user_prompt = build_user_prompt(
@@ -70,6 +73,7 @@ async def review_pr(
         pr_body=pr_info.get("body") or "",
         base_branch=pr_info["base"]["ref"],
         head_branch=pr_info["head"]["ref"],
+        previous_reviews=previous_reviews,
     )
 
     chosen_model = model_override or config.model
