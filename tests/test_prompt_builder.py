@@ -66,6 +66,21 @@ class TestBuildUserPrompt:
         assert "이전 리뷰" in prompt
         assert "이전지적" in prompt
 
+    def test_previous_reviews_marked_as_reference_not_truth(self):
+        """현재 PR 본문/코드가 진리. 이전 리뷰는 참고만."""
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            previous_reviews=["## 🤖 코드 리뷰\nold"],
+        )
+        # 우선순위 명시
+        assert "참고" in prompt
+        # 본문/코드 갱신 시 결론 갱신 가능 명시
+        assert ("갱신" in prompt or "최신" in prompt or "변경" in prompt)
+        # 일관성 강제하는 옛 표현은 빠져야
+        assert "일관성을 유지하라" not in prompt
+
     def test_no_previous_reviews_section_when_empty(self):
         prompt = build_user_prompt(
             files=self._files(),
