@@ -24,12 +24,37 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.REVIEW_BOT_APP_ID }}
+          private-key: ${{ secrets.REVIEW_BOT_APP_PRIVATE_KEY }}
       - uses: sr-ai-dev/syscon-review-bot@main
         with:
           openai-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ steps.app-token.outputs.token }}
 ```
 
-레포 (또는 조직) Secrets에 `OPENAI_API_KEY` 추가하면 끝.
+레포 (또는 조직) Secrets에 세 가지 추가:
+- `OPENAI_API_KEY` — OpenAI API 키
+- `REVIEW_BOT_APP_ID` — GitHub App ID (아래 "GitHub App 설정" 참조)
+- `REVIEW_BOT_APP_PRIVATE_KEY` — GitHub App private key (PEM 전체)
+
+> 기본 `GITHUB_TOKEN`은 GitHub 정책상 PR APPROVE가 불가능합니다. APPROVE 결정을 실제로 반영하려면 GitHub App 토큰을 사용해야 합니다.
+
+## GitHub App 설정 (1회)
+
+1. **App 등록**: https://github.com/settings/apps/new (조직 단위면 조직 Settings → Developer settings → GitHub Apps → New GitHub App)
+   - Name: 예) `syscon-review-bot`
+   - Homepage URL: 임의
+   - Webhook: **Active 체크 해제** (액션에서 직접 호출하므로 불필요)
+   - **Repository permissions**:
+     - Contents: Read
+     - Pull requests: **Read & write**
+   - "Where can this GitHub App be installed?": Only on this account (조직 내부용)
+2. 등록 후 **App ID** 확인 → `REVIEW_BOT_APP_ID` secret으로 저장
+3. **Generate a private key** 클릭 → 다운로드된 `.pem` 파일 전체 내용을 `REVIEW_BOT_APP_PRIVATE_KEY` secret으로 저장
+4. App 상세 페이지의 **Install App**에서 대상 레포(또는 조직 전체)에 설치
 
 ## Configuration (옵션)
 
@@ -70,7 +95,7 @@ approve_criteria:
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
 | `openai-key` | yes | — | OpenAI API key |
-| `github-token` | no | `${{ github.token }}` | Posting 권한 (자동) |
+| `github-token` | no | `${{ github.token }}` | API 인증 토큰. APPROVE 동작이 필요하면 GitHub App installation token으로 덮어쓰기 |
 | `model` | no | `''` | 모델 강제 지정 |
 | `config-path` | no | `.github/review-bot.yml` | 설정 파일 경로 |
 
@@ -78,7 +103,7 @@ approve_criteria:
 
 서버사이드로 결정 재계산:
 
-- `score >= 9` AND `critical == 0` AND `warning <= max_medium_issues` → **APPROVE**
+- `score >= 8` AND `critical == 0` AND `warning <= max_medium_issues` → **APPROVE**
 - `score < 7` OR `critical > max_high_issues` → **REQUEST_CHANGES**
 - 그 외 → **COMMENT**
 

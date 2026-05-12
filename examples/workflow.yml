@@ -15,9 +15,17 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # APPROVE 동작을 활성화하려면 GitHub App installation token 발급.
+      # 기본 GITHUB_TOKEN으로는 GitHub 정책상 PR APPROVE가 불가능함.
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.REVIEW_BOT_APP_ID }}
+          private-key: ${{ secrets.REVIEW_BOT_APP_PRIVATE_KEY }}
+
       - uses: sr-ai-dev/syscon-review-bot@main
         with:
           openai-key: ${{ secrets.OPENAI_API_KEY }}
-          # github-token defaults to ${{ github.token }}
+          github-token: ${{ steps.app-token.outputs.token }}
           # model: gpt-5-mini       # optional — overrides config.review.model
           # config-path: .github/review-bot.yml   # optional
