@@ -68,12 +68,13 @@ class TestFormatReviewBody:
         body = format_review_body(result)
         assert "아키텍처" in body
         assert "A 모듈이 B를 역참조" in body
-        # 아키텍처 우려가 있으면 결정도 Request Changes로 바뀌어야 (decision 통과 검증)
         assert "Request Changes" in body
 
-    def test_omits_architecture_section_when_empty(self):
+    def test_architecture_section_always_shown(self):
+        """검수 사실 노출용. 우려 없어도 '이상 없음' 표시."""
         body = format_review_body(_result_aligned())
-        assert "아키텍처" not in body
+        assert "아키텍처" in body
+        assert "이상 없음" in body
 
     def test_no_score_no_severity_tiers(self):
         for r in (_result_aligned(), _result_mismatched(), _result_missing()):

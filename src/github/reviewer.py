@@ -56,12 +56,12 @@ def format_review_body(result: ReviewResult) -> str:
             loc = _format_location(m)
             lines.append(f"| {idx} | {desc} | {loc} | {sugg} |")
 
+    lines.append("")
+    lines.append("### 아키텍처 검토")
     if result.architecture_concern:
-        lines.extend([
-            "",
-            "### 아키텍처 우려",
-            f"> {result.architecture_concern}",
-        ])
+        lines.append(f"> {result.architecture_concern}")
+    else:
+        lines.append("> 이상 없음")
 
     lines.append("")
     lines.append(f"### 판정: {_VERDICT_LABEL[decision]}")
