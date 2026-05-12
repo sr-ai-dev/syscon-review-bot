@@ -13,7 +13,7 @@ def compute_decision(
     if score < 7 or critical_count > criteria.max_high_issues:
         return Decision.REQUEST_CHANGES
 
-    if score >= 9 and warning_count <= criteria.max_medium_issues:
+    if score >= 8 and warning_count <= criteria.max_medium_issues:
         return Decision.APPROVE
 
     return Decision.COMMENT

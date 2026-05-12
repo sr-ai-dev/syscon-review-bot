@@ -26,11 +26,23 @@ class TestComputeDecision:
     def test_low_score_request_changes(self):
         assert compute_decision(6, [], CRIT) == Decision.REQUEST_CHANGES
 
-    def test_mid_score_no_critical_comments(self):
-        assert compute_decision(8, [issue("warning")], CRIT) == Decision.COMMENT
+    def test_score_8_no_warnings_approves(self):
+        """Real case (PR 634): score 8 + only minor issues should approve."""
+        assert compute_decision(8, [issue("minor")], CRIT) == Decision.APPROVE
+
+    def test_score_8_with_warnings_within_threshold_approves(self):
+        assert compute_decision(8, [issue("warning")], CRIT) == Decision.APPROVE
+
+    def test_score_7_comments(self):
+        """Score 7 is still below APPROVE bar (8)."""
+        assert compute_decision(7, [], CRIT) == Decision.COMMENT
 
     def test_mid_score_with_critical_request_changes(self):
         assert compute_decision(8, [issue("critical")], CRIT) == Decision.REQUEST_CHANGES
+
+    def test_score_8_too_many_warnings_comments(self):
+        issues = [issue("warning") for _ in range(5)]
+        assert compute_decision(8, issues, CRIT) == Decision.COMMENT
 
     def test_too_many_warnings_drops_to_comment(self):
         issues = [issue("warning") for _ in range(5)]
