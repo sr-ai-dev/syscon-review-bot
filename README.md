@@ -24,7 +24,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: kj-choi-syscon/syscon-review-bot@v1
+      - uses: sr-ai-dev/syscon-review-bot@main
         with:
           openai-key: ${{ secrets.OPENAI_API_KEY }}
 ```

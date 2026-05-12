@@ -1,6 +1,6 @@
 name: 'Syscon AI Code Review'
 description: 'Auto code review on PRs using OpenAI GPT — multi-language support'
-author: 'kj-choi-syscon'
+author: 'sr-ai-dev'
 branding:
   icon: 'check-circle'
   color: 'blue'
