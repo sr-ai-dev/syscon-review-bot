@@ -7,3 +7,7 @@ requires-python = ">=3.11"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.pyrefly]
+search-path = ["."]
+disable-search-path-heuristics = true
