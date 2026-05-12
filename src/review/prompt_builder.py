@@ -32,6 +32,17 @@ def build_system_prompt(config: ReviewConfig, languages: list[str]) -> str:
             parts.append(f"- {rule}")
 
     parts.append("")
+    parts.append("## 점수 기준")
+    parts.append(
+        "아래 루브릭을 따라 점수를 매겨라. 호출마다 점수가 흔들리지 않도록 "
+        "심각도 분포에 맞춰 결정론적으로 산정해야 한다."
+    )
+    parts.append("- 10: 이슈 없음. 모범적")
+    parts.append("- 9: minor 1~2개, 본질 영향 없음")
+    parts.append("- 8: minor 다수 또는 warning 1개")
+    parts.append("- 7: warning 2~3개")
+    parts.append("- 6 이하: warning 4개 이상 또는 critical 존재 (critical은 무조건 6 이하)")
+    parts.append("")
     parts.append("## 출력 형식")
     parts.append("반드시 아래 JSON 형식으로만 응답하라:")
     parts.append("""```json

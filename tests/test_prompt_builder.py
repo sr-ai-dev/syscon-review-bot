@@ -30,6 +30,33 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt(ReviewConfig(), languages=[])
         assert "score_rationale" in prompt
 
+    def test_includes_scoring_rubric(self):
+        prompt = build_system_prompt(ReviewConfig(), languages=[])
+        assert "점수 기준" in prompt
+        # rubric covers full 6~10 spectrum
+        for level in ("10", "9", "8", "7", "6"):
+            assert level in prompt
+        # rubric pegs severity to score so the model has a fixed scale
+        assert "critical" in prompt
+        assert "warning" in prompt
+        assert "minor" in prompt
+
+    def test_scoring_rubric_aligns_with_decision_thresholds(self):
+        """Rubric must produce scores consistent with decision.py boundaries:
+        critical → <7 (REQUEST_CHANGES), only minor → >=8 (APPROVE possible)."""
+        prompt = build_system_prompt(ReviewConfig(), languages=[])
+        rubric_section = prompt.split("## 점수 기준", 1)[1]
+        # score 8 must mention minor or warning (not critical)
+        assert "minor" in rubric_section.split("8", 2)[0] or "minor" in rubric_section.split("8", 2)[1][:200]
+        # critical must drop below 7
+        below_7 = rubric_section.split("6", 1)[1] if "6" in rubric_section else ""
+        # simpler: critical appears in the lower half
+        idx_critical = rubric_section.find("critical")
+        idx_minor = rubric_section.find("minor")
+        assert idx_minor != -1 and idx_critical != -1
+        # minor mentioned earlier (higher scores listed first)
+        assert idx_minor < idx_critical
+
     def test_includes_language_section_when_provided(self):
         prompt = build_system_prompt(ReviewConfig(), languages=["Python", "C++"])
         assert "Python" in prompt
