@@ -84,14 +84,10 @@ async def submit_review(
     pr_number: int,
     result: ReviewResult,
 ) -> None:
+    # 기본 GITHUB_TOKEN은 GitHub 정책상 APPROVE 이벤트를 거부한다(422).
+    # 봇의 결정은 본문의 판정 라벨로 노출하고, API 이벤트는 항상 COMMENT로 통일.
     body = format_review_body(result)
-    event = {
-        Decision.APPROVE: "APPROVE",
-        Decision.COMMENT: "COMMENT",
-        Decision.REQUEST_CHANGES: "REQUEST_CHANGES",
-    }[result.decision]
-
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
-        json_data={"body": body, "event": event},
+        json_data={"body": body, "event": "COMMENT"},
     )

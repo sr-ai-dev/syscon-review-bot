@@ -105,8 +105,8 @@ async def test_review_pr_overrides_gpt_decision(context):
     ):
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
-    call = mock_github.post.call_args
-    assert "REQUEST_CHANGES" in str(call)
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "Request Changes" in payload["body"]
 
 
 @pytest.mark.asyncio

@@ -144,16 +144,24 @@ class TestFilterBotReviews:
 
 class TestSubmitReview:
     @pytest.mark.asyncio
-    async def test_submit_approve(self):
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value={"id": 1})
+    async def test_always_submits_as_comment_event(self):
+        """기본 GITHUB_TOKEN이 APPROVE를 못 보내는 GitHub 정책 때문에,
+        실제 결정과 무관하게 API event는 항상 COMMENT로 보낸다.
+        봇의 판정은 본문 라벨로만 표시."""
+        for decision, label in [
+            (Decision.APPROVE, "Approve"),
+            (Decision.COMMENT, "Comment"),
+            (Decision.REQUEST_CHANGES, "Request Changes"),
+        ]:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value={"id": 1})
 
-        result = ReviewResult(
-            score=9, summary="Great", decision=Decision.APPROVE,
-            issues=[], good_points=[],
-        )
-        await submit_review(mock_client, "owner/repo", 42, result)
+            result = ReviewResult(
+                score=9, summary="ok", decision=decision,
+                issues=[], good_points=[],
+            )
+            await submit_review(mock_client, "owner/repo", 42, result)
 
-        mock_client.post.assert_called_once()
-        body = mock_client.post.call_args
-        assert "APPROVE" in str(body)
+            payload = mock_client.post.call_args.kwargs["json_data"]
+            assert payload["event"] == "COMMENT", f"{decision}에서 event가 COMMENT 아님"
+            assert label in payload["body"], f"본문에 판정 라벨 '{label}' 누락"
