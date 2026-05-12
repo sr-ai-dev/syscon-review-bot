@@ -44,17 +44,21 @@ jobs:
 
 ## GitHub App 설정 (1회)
 
-1. **App 등록**: https://github.com/settings/apps/new (조직 단위면 조직 Settings → Developer settings → GitHub Apps → New GitHub App)
+App은 `sr-ai-dev` 조직 단위로 1개 만들어 두고, 봇을 쓰는 각 소비자 조직/레포에 설치하는 방식.
+
+1. **App 등록**: `sr-ai-dev` 조직 Settings → Developer settings → GitHub Apps → New GitHub App
    - Name: 예) `syscon-review-bot`
    - Homepage URL: 임의
    - Webhook: **Active 체크 해제** (액션에서 직접 호출하므로 불필요)
    - **Repository permissions**:
      - Contents: Read
      - Pull requests: **Read & write**
-   - "Where can this GitHub App be installed?": Only on this account (조직 내부용)
-2. 등록 후 **App ID** 확인 → `REVIEW_BOT_APP_ID` secret으로 저장
-3. **Generate a private key** 클릭 → 다운로드된 `.pem` 파일 전체 내용을 `REVIEW_BOT_APP_PRIVATE_KEY` secret으로 저장
-4. App 상세 페이지의 **Install App**에서 대상 레포(또는 조직 전체)에 설치
+   - "Where can this GitHub App be installed?": **Any account** (다른 조직에서도 설치 가능하게)
+2. 등록 후 **App ID** 확인 → 소비자 레포(또는 조직) Secrets에 `REVIEW_BOT_APP_ID`로 저장
+3. **Generate a private key** 클릭 → 다운로드된 `.pem` 파일 전체 내용을 소비자 측 Secrets에 `REVIEW_BOT_APP_PRIVATE_KEY`로 저장
+4. App 공개 페이지(`https://github.com/apps/<app-slug>`)의 **Install** 버튼으로 소비자 조직/레포에 설치
+
+> App ID/Private Key 자체는 `sr-ai-dev`에서 발급하지만, 시크릿은 **소비자 레포(또는 그 조직)** 에 등록해야 합니다 — 액션이 실행되는 곳에서 secret에 접근하므로.
 
 ## Configuration (옵션)
 
