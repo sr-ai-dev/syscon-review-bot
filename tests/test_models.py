@@ -60,6 +60,19 @@ class TestReviewResult:
         result = ReviewResult(spec_status=SpecStatus.MISSING, summary="x")
         assert result.aligned is False
 
+    def test_architecture_concern_field_accepted(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+            architecture_concern="레이어 역참조 의심: A가 B를 직접 import",
+        )
+        assert "레이어 역참조" in result.architecture_concern
+
+    def test_architecture_concern_defaults_empty(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+        )
+        assert result.architecture_concern == ""
+
     def test_old_fields_removed(self):
         """score, decision, issues, good_points, score_rationale은 더 이상 존재하지 않음."""
         with pytest.raises(ValidationError):

@@ -6,4 +6,6 @@ def compute_decision(result: ReviewResult) -> Decision:
         return Decision.REQUEST_CHANGES
     if not result.aligned:
         return Decision.REQUEST_CHANGES
+    if result.architecture_concern:
+        return Decision.REQUEST_CHANGES
     return Decision.APPROVE

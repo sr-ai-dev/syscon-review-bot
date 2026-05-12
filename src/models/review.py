@@ -30,3 +30,4 @@ class ReviewResult(BaseModel):
     aligned: bool = False
     summary: str
     mismatches: list[Mismatch] = Field(default_factory=list)
+    architecture_concern: str = ""

@@ -59,6 +59,22 @@ class TestFormatReviewBody:
         # 스펙 없을 때 mismatch 섹션은 표시 안 함
         assert "src/" not in body
 
+    def test_renders_architecture_concern_when_present(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True,
+            summary="스펙 부합",
+            architecture_concern="A 모듈이 B를 역참조하는 의심 코드 있음",
+        )
+        body = format_review_body(result)
+        assert "아키텍처" in body
+        assert "A 모듈이 B를 역참조" in body
+        # 아키텍처 우려가 있으면 결정도 Request Changes로 바뀌어야 (decision 통과 검증)
+        assert "Request Changes" in body
+
+    def test_omits_architecture_section_when_empty(self):
+        body = format_review_body(_result_aligned())
+        assert "아키텍처" not in body
+
     def test_no_score_no_severity_tiers(self):
         for r in (_result_aligned(), _result_mismatched(), _result_missing()):
             body = format_review_body(r)

@@ -25,6 +25,12 @@ class TestBuildSystemPrompt:
         for field in ("spec_status", "aligned", "summary", "mismatches"):
             assert field in prompt
 
+    def test_includes_brief_architecture_check(self):
+        """스펙 정합성이 주이지만 명백한 아키텍처 문제는 별도 한 줄로 보고."""
+        prompt = build_system_prompt()
+        assert "아키텍처" in prompt
+        assert "architecture_concern" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
