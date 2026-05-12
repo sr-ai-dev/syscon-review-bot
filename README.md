@@ -76,6 +76,18 @@ approve_criteria:
 | `model` | no | `''` | 모델 강제 지정 |
 | `config-path` | no | `.github/review-bot.yml` | 설정 파일 경로 |
 
+## 로컬 디버깅 (Dry Run)
+
+GPT/submit 호출 없이 봇이 GPT에 보내려는 프롬프트만 stdout으로 덤프하려면:
+
+```bash
+cp .env.example .env  # 값 채우기 (PR payload는 gh로 받아 파일로 저장)
+set -a; source .env; set +a
+REVIEW_DRY_RUN=1 .venv/bin/python -m src.cli
+```
+
+룰·루브릭·언어 힌트 변경 후 실제로 GPT가 받을 입력이 의도대로 조립되는지 확인할 때 사용.
+
 ## Decision Logic
 
 서버사이드로 결정 재계산:

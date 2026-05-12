@@ -159,6 +159,34 @@ async def test_review_pr_handles_no_previous_reviews(context, good_review):
 
 
 @pytest.mark.asyncio
+async def test_review_pr_dry_run_skips_gpt_and_submit(context, good_review, capsys):
+    """REVIEW_DRY_RUN 모드: 프롬프트 생성까지만 하고 stdout에 출력, GPT/submit 호출 안 함."""
+    mock_github = AsyncMock()
+    mock_github.get.return_value = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x"
+    mock_github.get_json.side_effect = make_get_json_dispatch()
+    mock_github.post = AsyncMock(return_value={"id": 1})
+
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(),
+    ):
+        await review_pr(
+            context=context, github_client=mock_github, gpt_client=mock_gpt,
+            dry_run=True,
+        )
+
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_not_called()
+    out = capsys.readouterr().out
+    assert "SYSTEM PROMPT" in out
+    assert "USER PROMPT" in out
+    assert "코드 리뷰어" in out  # system prompt content
+    assert "변경 사항" in out    # user prompt content
+
+
+@pytest.mark.asyncio
 async def test_review_pr_uses_config_model(context, good_review):
     mock_github = AsyncMock()
     mock_github.get.return_value = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x"

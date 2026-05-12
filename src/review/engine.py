@@ -41,6 +41,7 @@ async def review_pr(
     gpt_client: GPTClient,
     config_path: str = ".github/review-bot.yml",
     model_override: str | None = None,
+    dry_run: bool = False,
 ) -> None:
     logger.info(f"Reviewing {context.repo}#{context.pr_number}")
 
@@ -75,6 +76,15 @@ async def review_pr(
         head_branch=pr_info["head"]["ref"],
         previous_reviews=previous_reviews,
     )
+
+    if dry_run:
+        print("===== SYSTEM PROMPT =====")
+        print(system_prompt)
+        print()
+        print("===== USER PROMPT =====")
+        print(user_prompt)
+        logger.info("Dry run complete (GPT/submit skipped)")
+        return
 
     chosen_model = model_override or config.model
     result = await gpt_client.review(system_prompt, user_prompt, model=chosen_model)

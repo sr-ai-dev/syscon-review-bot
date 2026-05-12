@@ -72,6 +72,34 @@ class TestCli:
         assert exit_code != 0
 
     @pytest.mark.asyncio
+    async def test_dry_run_env_propagates_to_review_pr(self, event_file, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("REVIEW_DRY_RUN", "1")
+
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            await main()
+
+        assert mock_review.call_args.kwargs["dry_run"] is True
+
+    @pytest.mark.asyncio
+    async def test_dry_run_default_false(self, event_file, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("REVIEW_DRY_RUN", raising=False)
+
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            await main()
+
+        assert mock_review.call_args.kwargs.get("dry_run", False) is False
+
+    @pytest.mark.asyncio
     async def test_model_override_env_takes_precedence(self, event_file, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))

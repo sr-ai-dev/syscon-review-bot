@@ -51,6 +51,7 @@ async def main() -> int:
     model_env = os.environ.get("OPENAI_MODEL")
     model_override = os.environ.get("REVIEW_MODEL_OVERRIDE") or None
     config_path = os.environ.get("REVIEW_CONFIG_PATH", ".github/review-bot.yml")
+    dry_run = bool(os.environ.get("REVIEW_DRY_RUN"))
 
     github_client = GitHubClient(token=token)
     if model_env:
@@ -65,6 +66,7 @@ async def main() -> int:
             gpt_client=gpt_client,
             config_path=config_path,
             model_override=model_override,
+            dry_run=dry_run,
         )
         return 0
     except Exception:
