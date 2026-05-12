@@ -1,8 +1,9 @@
 from src.github.client import GitHubClient
-from src.models.review import Decision, Issue, ReviewResult
+from src.models.review import Decision, Mismatch, ReviewResult, SpecStatus
+from src.review.decision import compute_decision
 
 
-BOT_REVIEW_MARKER = "## 🤖 코드 리뷰"
+BOT_REVIEW_MARKER = "## 🤖 스펙 정합성 리뷰"
 
 
 def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
@@ -13,67 +14,50 @@ def _escape_table_cell(text: str | None) -> str:
     if not text:
         return ""
     text = text.replace("|", r"\|")
-    text = " ".join(text.split())
-    return text
+    return " ".join(text.split())
 
 
-def _format_location(issue: Issue) -> str:
-    if issue.file is None:
+def _format_location(m: Mismatch) -> str:
+    if m.file is None:
         return "_전체 PR_"
-    safe_file = _escape_table_cell(issue.file)
-    if issue.line:
-        return f"`{safe_file}:{issue.line}`"
-    return f"`{safe_file}`"
+    safe = _escape_table_cell(m.file)
+    if m.line:
+        return f"`{safe}:{m.line}`"
+    return f"`{safe}`"
 
 
-def _format_issue_table(issues: list[Issue], header: str) -> list[str]:
-    lines = ["", header, "| # | 이슈 | 파일 | 제안 |", "|---|------|------|------|"]
-    for idx, issue in enumerate(issues, 1):
-        desc = _escape_table_cell(issue.description)
-        sugg = _escape_table_cell(issue.suggestion)
-        loc = _format_location(issue)
-        lines.append(f"| {idx} | {desc} | {loc} | {sugg} |")
-    return lines
+_VERDICT_LABEL = {
+    Decision.APPROVE: "✅ 스펙 부합 (Approve)",
+    Decision.REQUEST_CHANGES: "❌ 수정 필요 (Request Changes)",
+    Decision.COMMENT: "💬 Comment",
+}
 
 
 def format_review_body(result: ReviewResult) -> str:
-    lines = [
-        f"{BOT_REVIEW_MARKER} — 점수: {result.score}/10",
-    ]
-    if result.score_rationale:
-        lines.append("")
-        lines.append(f"> **점수 근거**: {result.score_rationale}")
-    lines.extend([
-        "",
-        result.summary,
-        "",
-        "---",
-    ])
+    decision = compute_decision(result)
+    lines = [BOT_REVIEW_MARKER, "", result.summary]
 
-    critical = [i for i in result.issues if i.severity == "critical"]
-    warnings = [i for i in result.issues if i.severity == "warning"]
-    minor = [i for i in result.issues if i.severity == "minor"]
+    if result.spec_status == SpecStatus.MISSING:
+        lines.extend([
+            "",
+            "> PR 본문에 스펙·요구사항 문서가 첨부되지 않아 코드 변경의 의도 정합성을 검증할 수 없습니다.",
+            "> 요구사항을 인라인으로 추가하거나, 스펙 문서/티켓 링크를 PR 본문에 포함시켜주세요.",
+        ])
+    elif result.mismatches:
+        lines.extend([
+            "",
+            "### 스펙과 불일치",
+            "| # | 항목 | 위치 | 제안 |",
+            "|---|------|------|------|",
+        ])
+        for idx, m in enumerate(result.mismatches, 1):
+            desc = _escape_table_cell(m.description)
+            sugg = _escape_table_cell(m.suggestion)
+            loc = _format_location(m)
+            lines.append(f"| {idx} | {desc} | {loc} | {sugg} |")
 
-    if critical:
-        lines.extend(_format_issue_table(critical, "### 🔴 필수 수정"))
-    if warnings:
-        lines.extend(_format_issue_table(warnings, "### 🟡 권고"))
-    if minor:
-        lines.extend(_format_issue_table(minor, "### 🔵 마이너"))
-
-    if result.good_points:
-        lines.append("")
-        lines.append("### 👍 잘된 점")
-        for point in result.good_points:
-            lines.append(f"- {point}")
-
-    decision_label = {
-        Decision.APPROVE: "✅ Approve",
-        Decision.COMMENT: "💬 Comment",
-        Decision.REQUEST_CHANGES: "❌ Request Changes",
-    }[result.decision]
     lines.append("")
-    lines.append(f"### 판정: {decision_label}")
+    lines.append(f"### 판정: {_VERDICT_LABEL[decision]}")
 
     return "\n".join(lines)
 
@@ -85,7 +69,7 @@ async def submit_review(
     result: ReviewResult,
 ) -> None:
     # 기본 GITHUB_TOKEN은 GitHub 정책상 APPROVE 이벤트를 거부한다(422).
-    # 봇의 결정은 본문의 판정 라벨로 노출하고, API 이벤트는 항상 COMMENT로 통일.
+    # 봇의 결정은 본문 라벨로 노출하고, API 이벤트는 항상 COMMENT로 통일.
     body = format_review_body(result)
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",

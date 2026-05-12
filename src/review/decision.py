@@ -1,19 +1,9 @@
-from src.models.review import Issue, Decision
-from src.models.config import ApprovalCriteria
+from src.models.review import Decision, ReviewResult, SpecStatus
 
 
-def compute_decision(
-    score: int,
-    issues: list[Issue],
-    criteria: ApprovalCriteria,
-) -> Decision:
-    critical_count = sum(1 for i in issues if i.severity == "critical")
-    warning_count = sum(1 for i in issues if i.severity == "warning")
-
-    if score < 7 or critical_count > criteria.max_high_issues:
+def compute_decision(result: ReviewResult) -> Decision:
+    if result.spec_status == SpecStatus.MISSING:
         return Decision.REQUEST_CHANGES
-
-    if score >= 8 and warning_count <= criteria.max_medium_issues:
-        return Decision.APPROVE
-
-    return Decision.COMMENT
+    if not result.aligned:
+        return Decision.REQUEST_CHANGES
+    return Decision.APPROVE

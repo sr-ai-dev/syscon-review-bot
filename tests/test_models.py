@@ -1,79 +1,102 @@
-from src.models.review import Issue, ReviewResult, Decision
-from src.models.config import ReviewConfig, RulesConfig, ApprovalCriteria, IgnoreConfig
+import pytest
+from pydantic import ValidationError
+
+from src.models.review import Mismatch, ReviewResult, SpecStatus, Decision
+from src.models.config import ReviewConfig, IgnoreConfig
 
 
-class TestIssue:
-    def test_create_issue(self):
-        issue = Issue(
-            severity="critical",
-            category="security",
-            file="src/api/users.py",
+class TestMismatch:
+    def test_create_with_location(self):
+        m = Mismatch(
+            file="src/api/auth.py",
             line=42,
-            description="SQL injection possible",
-            suggestion="Use parameterized query",
+            description="로그인 엔드포인트가 스펙에는 POST /auth/login인데 구현은 /login.",
+            suggestion="라우트를 /auth/login으로 변경",
         )
-        assert issue.severity == "critical"
-        assert issue.file == "src/api/users.py"
+        assert m.file == "src/api/auth.py"
+        assert m.line == 42
 
-    def test_issue_file_can_be_null(self):
-        issue = Issue(
-            severity="warning",
-            category="test_coverage",
-            file=None,
-            line=None,
-            description="No tests",
-            suggestion="Add tests",
+    def test_create_without_location(self):
+        m = Mismatch(
+            file=None, line=None,
+            description="스펙의 비밀번호 정책 검증 누락",
+            suggestion="최소 길이/특수문자 검증 추가",
         )
-        assert issue.file is None
-        assert issue.line is None
+        assert m.file is None and m.line is None
 
 
 class TestReviewResult:
-    def test_create_review_result(self):
+    def test_present_aligned(self):
         result = ReviewResult(
-            score=8,
-            summary="Overall good",
-            decision=Decision.COMMENT,
-            issues=[],
-            good_points=["Clean architecture"],
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="스펙대로 구현됨",
         )
-        assert result.score == 8
-        assert result.decision == Decision.COMMENT
+        assert result.spec_status == SpecStatus.PRESENT
+        assert result.aligned is True
+        assert result.mismatches == []
 
-    def test_score_rationale_field_accepted(self):
+    def test_present_with_mismatches(self):
         result = ReviewResult(
-            score=8,
-            summary="ok",
-            decision=Decision.APPROVE,
-            score_rationale="critical 0개, warning 0개라 만점 근처지만 minor 2건이 있어 8점",
+            spec_status=SpecStatus.PRESENT,
+            aligned=False,
+            summary="스펙 일부 누락",
+            mismatches=[
+                Mismatch(file="a.py", line=1, description="d", suggestion="s"),
+            ],
         )
-        assert "minor 2건" in result.score_rationale
+        assert len(result.mismatches) == 1
 
-    def test_score_rationale_defaults_empty(self):
-        result = ReviewResult(score=8, summary="ok", decision=Decision.APPROVE)
-        assert result.score_rationale == ""
+    def test_missing_spec(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.MISSING,
+            aligned=False,
+            summary="PR 본문에 스펙·요구사항이 없어 검증 불가",
+        )
+        assert result.spec_status == SpecStatus.MISSING
 
-    def test_score_must_be_1_to_10(self):
-        from pydantic import ValidationError
-        import pytest
+    def test_aligned_default_false(self):
+        """aligned가 명시 안 됐을 때 안전한 기본값(False)으로."""
+        result = ReviewResult(spec_status=SpecStatus.MISSING, summary="x")
+        assert result.aligned is False
+
+    def test_old_fields_removed(self):
+        """score, decision, issues, good_points, score_rationale은 더 이상 존재하지 않음."""
         with pytest.raises(ValidationError):
-            ReviewResult(score=0, summary="x", decision=Decision.COMMENT)
-        with pytest.raises(ValidationError):
-            ReviewResult(score=11, summary="x", decision=Decision.COMMENT)
+            ReviewResult(
+                spec_status=SpecStatus.PRESENT, aligned=True, summary="x",
+                score=8,  # 폐기된 필드
+            )
+
+
+class TestDecisionEnum:
+    def test_three_values(self):
+        # GitHub event 이름과 매칭. APPROVE는 정책상 못 보내지만 결정 라벨로는 유지.
+        assert {d.value for d in Decision} == {"approve", "comment", "request_changes"}
 
 
 class TestReviewConfig:
     def test_default_config(self):
         config = ReviewConfig()
-        assert config.review_language == "korean"
-        assert config.rules.code_quality is True
-        assert config.approve_criteria.max_high_issues == 0
         assert config.model is None
-
-    def test_custom_rules(self):
-        config = ReviewConfig(custom_rules=["No magic numbers"])
-        assert "No magic numbers" in config.custom_rules
+        assert config.ignore.files == []
+        assert config.ignore.extensions == []
 
     def test_model_override(self):
         config = ReviewConfig(model="gpt-5.4-mini")
         assert config.model == "gpt-5.4-mini"
+
+    def test_ignore_config(self):
+        config = ReviewConfig(ignore=IgnoreConfig(files=["*.lock"], extensions=[".md"]))
+        assert "*.lock" in config.ignore.files
+
+    def test_removed_fields(self):
+        """rules, custom_rules, review_language, approve_criteria 모두 제거됨."""
+        with pytest.raises(ValidationError):
+            ReviewConfig(rules={"security": True})
+        with pytest.raises(ValidationError):
+            ReviewConfig(custom_rules=["x"])
+        with pytest.raises(ValidationError):
+            ReviewConfig(review_language="korean")
+        with pytest.raises(ValidationError):
+            ReviewConfig(approve_criteria={"max_high_issues": 0})

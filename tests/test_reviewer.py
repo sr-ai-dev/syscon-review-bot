@@ -7,161 +7,112 @@ from src.github.reviewer import (
     format_review_body,
     submit_review,
 )
-from src.models.review import ReviewResult, Issue, Decision
+from src.models.review import Decision, Mismatch, ReviewResult, SpecStatus
+
+
+def _result_missing():
+    return ReviewResult(
+        spec_status=SpecStatus.MISSING, aligned=False,
+        summary="PR 본문에 스펙·요구사항이 없어 검증 불가",
+    )
+
+
+def _result_aligned():
+    return ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True,
+        summary="모든 요구사항이 코드에 반영됨",
+    )
+
+
+def _result_mismatched():
+    return ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False,
+        summary="스펙 일부 누락",
+        mismatches=[
+            Mismatch(file="src/auth.py", line=10, description="로그아웃 엔드포인트 누락", suggestion="POST /auth/logout 추가"),
+            Mismatch(file=None, line=None, description="비밀번호 정책 검증 누락", suggestion="최소 길이 검증 추가"),
+        ],
+    )
 
 
 class TestFormatReviewBody:
-    def test_format_with_issues(self):
+    def test_marker_at_top(self):
+        body = format_review_body(_result_aligned())
+        assert body.startswith(BOT_REVIEW_MARKER)
+
+    def test_aligned_shows_approve_verdict(self):
+        body = format_review_body(_result_aligned())
+        assert "스펙 부합" in body or "Approve" in body
+        assert "❌" not in body
+
+    def test_mismatched_lists_each_with_location(self):
+        body = format_review_body(_result_mismatched())
+        assert "로그아웃 엔드포인트 누락" in body
+        assert "src/auth.py:10" in body
+        assert "비밀번호 정책 검증 누락" in body
+        assert "Request Changes" in body
+
+    def test_missing_spec_explains_requirement(self):
+        body = format_review_body(_result_missing())
+        assert "스펙" in body or "요구사항" in body
+        assert "Request Changes" in body
+        # 스펙 없을 때 mismatch 섹션은 표시 안 함
+        assert "src/" not in body
+
+    def test_no_score_no_severity_tiers(self):
+        for r in (_result_aligned(), _result_mismatched(), _result_missing()):
+            body = format_review_body(r)
+            for dead in ("점수", "score", "🔴", "🟡", "🔵", "critical", "warning", "minor"):
+                assert dead not in body, f"폐기된 표기 '{dead}'가 본문에 남아있음"
+
+    def test_pipe_escaped_in_mismatch_description(self):
         result = ReviewResult(
-            score=6, summary="Needs work", decision=Decision.REQUEST_CHANGES,
-            issues=[
-                Issue(severity="critical", category="security", file="src/api.py",
-                      line=10, description="SQL injection", suggestion="Parameterized query"),
-                Issue(severity="warning", category="quality", file="src/utils.py",
-                      line=5, description="Dup code", suggestion="Extract function"),
+            spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+            mismatches=[
+                Mismatch(file="x.py", line=1, description="Use `a | b`", suggestion="Replace `|`"),
             ],
-            good_points=["Good naming"],
-        )
-        body = format_review_body(result)
-        assert "점수: 6/10" in body
-        assert "필수 수정" in body
-        assert "SQL injection" in body
-        assert "권고" in body
-        assert "Good naming" in body
-
-    def test_format_includes_score_rationale_when_present(self):
-        result = ReviewResult(
-            score=8, summary="Good", decision=Decision.APPROVE,
-            score_rationale="critical 0개, warning 0개, minor 2건이라 8점",
-            issues=[], good_points=[],
-        )
-        body = format_review_body(result)
-        assert "critical 0개, warning 0개, minor 2건이라 8점" in body
-        assert body.index("critical 0개") < body.index("Good")
-
-    def test_format_omits_score_rationale_when_empty(self):
-        result = ReviewResult(
-            score=8, summary="Good", decision=Decision.APPROVE,
-            score_rationale="",
-            issues=[], good_points=[],
-        )
-        body = format_review_body(result)
-        assert "점수 근거" not in body
-
-    def test_format_approve_only(self):
-        result = ReviewResult(
-            score=9, summary="Great", decision=Decision.APPROVE,
-            issues=[], good_points=["Clean"],
-        )
-        body = format_review_body(result)
-        assert "Approve" in body
-
-    def test_format_omits_empty_sections(self):
-        result = ReviewResult(
-            score=9, summary="Good", decision=Decision.APPROVE,
-            issues=[], good_points=["Nice"],
-        )
-        body = format_review_body(result)
-        assert "필수 수정" not in body
-        assert "권고" not in body
-
-    def test_format_handles_null_file(self):
-        result = ReviewResult(
-            score=7, summary="Missing tests", decision=Decision.COMMENT,
-            issues=[
-                Issue(severity="warning", category="test_coverage",
-                      file=None, line=None,
-                      description="No tests added", suggestion="Add tests"),
-            ],
-            good_points=[],
-        )
-        body = format_review_body(result)
-        assert "No tests added" in body
-        assert "None" not in body
-        assert "null" not in body.lower()
-
-    def test_format_escapes_pipe_in_description(self):
-        result = ReviewResult(
-            score=8, summary="S", decision=Decision.COMMENT,
-            issues=[
-                Issue(severity="warning", category="quality", file="x.py", line=1,
-                      description="Use `a | b` operator", suggestion="Replace `|`"),
-            ],
-            good_points=[],
         )
         body = format_review_body(result)
         assert r"a \| b" in body
 
-    def test_format_collapses_newlines_in_cell(self):
+    def test_newlines_in_description_collapsed(self):
         result = ReviewResult(
-            score=8, summary="S", decision=Decision.COMMENT,
-            issues=[
-                Issue(severity="warning", category="quality", file="x.py", line=1,
-                      description="Line1\nLine2\nLine3", suggestion="Single line"),
+            spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+            mismatches=[
+                Mismatch(file="x.py", line=1, description="Line1\nLine2", suggestion="Single"),
             ],
-            good_points=[],
         )
         body = format_review_body(result)
         row = next(line for line in body.split("\n") if "Line1" in line)
-        assert "Line2" in row and "Line3" in row
+        assert "Line2" in row
 
 
 class TestFilterBotReviews:
-    def test_keeps_only_bot_marker_reviews(self):
+    def test_keeps_only_marker(self):
         raw = [
-            {"body": f"{BOT_REVIEW_MARKER} — 점수: 7/10\nfoo"},
-            {"body": "looks good to me"},
-            {"body": f"{BOT_REVIEW_MARKER} — 점수: 8/10\nbar"},
-        ]
-        result = filter_bot_reviews(raw)
-        assert len(result) == 2
-        assert all(BOT_REVIEW_MARKER in r["body"] for r in result)
-
-    def test_returns_empty_when_no_bot_reviews(self):
-        raw = [
+            {"body": f"{BOT_REVIEW_MARKER}\nfoo"},
             {"body": "looks good"},
-            {"body": "approve"},
+            {"body": f"{BOT_REVIEW_MARKER}\nbar"},
         ]
-        assert filter_bot_reviews(raw) == []
+        assert len(filter_bot_reviews(raw)) == 2
 
-    def test_handles_missing_body_field(self):
-        raw = [
-            {"state": "PENDING"},  # no body
-            {"body": f"{BOT_REVIEW_MARKER} — 점수: 7/10"},
-        ]
-        result = filter_bot_reviews(raw)
-        assert len(result) == 1
-
-    def test_marker_matches_real_review_output(self):
-        """filter must accept the body produced by format_review_body."""
-        result = ReviewResult(
-            score=7, summary="ok", decision=Decision.COMMENT,
-            issues=[], good_points=[],
-        )
-        body = format_review_body(result)
+    def test_filter_matches_real_body(self):
+        body = format_review_body(_result_aligned())
         assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
 
 
 class TestSubmitReview:
     @pytest.mark.asyncio
-    async def test_always_submits_as_comment_event(self):
-        """기본 GITHUB_TOKEN이 APPROVE를 못 보내는 GitHub 정책 때문에,
-        실제 결정과 무관하게 API event는 항상 COMMENT로 보낸다.
-        봇의 판정은 본문 라벨로만 표시."""
-        for decision, label in [
-            (Decision.APPROVE, "Approve"),
-            (Decision.COMMENT, "Comment"),
-            (Decision.REQUEST_CHANGES, "Request Changes"),
+    async def test_always_comment_event(self):
+        """GITHUB_TOKEN의 APPROVE 정책 회피: 결정 무관 항상 COMMENT 이벤트."""
+        for result, label in [
+            (_result_aligned(), "Approve"),
+            (_result_mismatched(), "Request Changes"),
+            (_result_missing(), "Request Changes"),
         ]:
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value={"id": 1})
-
-            result = ReviewResult(
-                score=9, summary="ok", decision=decision,
-                issues=[], good_points=[],
-            )
-            await submit_review(mock_client, "owner/repo", 42, result)
-
-            payload = mock_client.post.call_args.kwargs["json_data"]
-            assert payload["event"] == "COMMENT", f"{decision}에서 event가 COMMENT 아님"
-            assert label in payload["body"], f"본문에 판정 라벨 '{label}' 누락"
+            client = AsyncMock()
+            client.post = AsyncMock(return_value={"id": 1})
+            await submit_review(client, "owner/repo", 1, result)
+            payload = client.post.call_args.kwargs["json_data"]
+            assert payload["event"] == "COMMENT"
+            assert label in payload["body"]

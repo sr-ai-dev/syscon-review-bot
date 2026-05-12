@@ -1,13 +1,13 @@
 # Syscon Review Bot
 
-PR이 열리거나 새 커밋이 푸시되면 OpenAI GPT로 자동 코드 리뷰. Python, TypeScript, C++, Java 등 다국어 지원.
+PR이 명시한 **스펙·요구사항**과 실제 코드 변경의 정합성을 자동 검토하는 GitHub Action. 코드 스타일·리팩토링·성능 등은 검토 대상이 아니다.
 
 ## Quick Start
 
 대상 레포에 `.github/workflows/review.yml` 추가:
 
 ```yaml
-name: AI Code Review
+name: Spec Alignment Review
 
 on:
   pull_request:
@@ -31,40 +31,29 @@ jobs:
 
 레포 (또는 조직) Secrets에 `OPENAI_API_KEY` 추가하면 끝.
 
-> 봇은 항상 **COMMENT 이벤트**로 리뷰를 남깁니다. 실제 판정(✅ Approve / 💬 Comment / ❌ Request Changes)은 리뷰 본문 하단의 "판정" 라벨로 표시됩니다. 기본 `GITHUB_TOKEN`이 GitHub 정책상 PR APPROVE를 못 하기 때문이며, 실제 머지 차단/승인은 사람이 보고 결정하는 구조.
+> 봇은 항상 **COMMENT 이벤트**로 리뷰를 남깁니다. 판정(✅ 스펙 부합 / ❌ 수정 필요)은 리뷰 본문 하단 라벨로 표시. 기본 `GITHUB_TOKEN`이 GitHub 정책상 PR APPROVE를 못 하기 때문이며, 실제 머지 차단/승인은 사람이 보고 결정.
+
+## 정합성 검토 동작
+
+봇은 PR마다 다음 순서로 동작합니다:
+
+1. **PR 본문에서 스펙·요구사항을 식별** (인라인 텍스트, 외부 문서 링크, 티켓 ID 참조 등)
+2. 스펙이 **없으면** → `❌ Request Changes`, 본문에 "스펙 첨부 필수" 안내
+3. 스펙이 **있으면** → 각 요구사항이 코드에 반영되었는지, 스펙 범위 밖 변경이 섞였는지 대조
+   - 불일치가 하나도 없으면 → `✅ 스펙 부합`
+   - 하나라도 있으면 → `❌ Request Changes` + 불일치 항목 표
 
 ## Configuration (옵션)
 
-레포 루트에 `.github/review-bot.yml` 생성:
+소비자 레포 루트에 `.github/review-bot.yml` 추가. 전부 선택사항:
 
 ```yaml
 review:
-  language: korean
-  severity_threshold: medium
-  model: gpt-5.4-mini       # 옵션 — 미설정 시 액션 input의 model 사용
+  model: gpt-5.4-mini    # 옵션 — 미설정 시 액션 input의 model 사용
 
-rules:
-  architecture: true
-  type_safety: true
-  code_quality: true
-  test_coverage: true
-  performance: true
-  security: true
-  error_handling: true
-  refactoring: true
-  documentation: true
-
-custom_rules:
-  - "C++ raw pointer 직접 사용 금지, 반드시 smart pointer 사용"
-  - "Python에서 mutable default argument 사용 금지"
-
-ignore:
+ignore:                  # 정합성 검토 대상에서 제외할 파일
   files: ["*.lock", "dist/**", "**/*.generated.*"]
   extensions: [".md", ".txt"]
-
-approve_criteria:
-  max_high_issues: 0       # critical 이슈 허용 개수
-  max_medium_issues: 3     # warning 이슈 허용 개수
 ```
 
 ## Action Inputs
@@ -78,7 +67,7 @@ approve_criteria:
 
 ## 로컬 디버깅 (Dry Run)
 
-GPT/submit 호출 없이 봇이 GPT에 보내려는 프롬프트만 stdout으로 덤프하려면:
+GPT/submit 호출 없이 봇이 GPT에 보낼 프롬프트만 stdout으로 덤프:
 
 ```bash
 cp .env.example .env  # 값 채우기 (PR payload는 gh로 받아 파일로 저장)
@@ -86,15 +75,7 @@ set -a; source .env; set +a
 REVIEW_DRY_RUN=1 .venv/bin/python -m src.cli
 ```
 
-룰·루브릭·언어 힌트 변경 후 실제로 GPT가 받을 입력이 의도대로 조립되는지 확인할 때 사용.
-
-## Decision Logic
-
-서버사이드로 결정 재계산:
-
-- `score >= 8` AND `critical == 0` AND `warning <= max_medium_issues` → **APPROVE**
-- `score < 7` OR `critical > max_high_issues` → **REQUEST_CHANGES**
-- 그 외 → **COMMENT**
+프롬프트 조립 로직 변경 시 실제로 GPT가 받을 입력이 의도대로 들어가는지 확인할 때 사용.
 
 ## License
 

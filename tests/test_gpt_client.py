@@ -4,24 +4,21 @@ import openai
 from unittest.mock import AsyncMock, patch
 
 from src.review.gpt_client import GPTClient
-from src.models.review import ReviewResult, Decision
+from src.models.review import ReviewResult, SpecStatus
 
 
 MOCK_GPT_RESPONSE = json.dumps({
-    "score": 8,
-    "summary": "Overall clean",
-    "decision": "comment",
-    "issues": [
+    "spec_status": "present",
+    "aligned": False,
+    "summary": "스펙 일부 누락",
+    "mismatches": [
         {
-            "severity": "warning",
-            "category": "code_quality",
-            "file": "src/main.py",
-            "line": 10,
-            "description": "Duplicated logic",
-            "suggestion": "Extract helper",
+            "file": "src/auth.py",
+            "line": 12,
+            "description": "스펙의 로그아웃 엔드포인트 누락",
+            "suggestion": "POST /auth/logout 추가",
         }
     ],
-    "good_points": ["Good naming"],
 })
 
 
@@ -53,8 +50,9 @@ class TestGPTClient:
             result = await client.review("sys", "usr")
 
         assert isinstance(result, ReviewResult)
-        assert result.score == 8
-        assert result.decision == Decision.COMMENT
+        assert result.spec_status == SpecStatus.PRESENT
+        assert result.aligned is False
+        assert len(result.mismatches) == 1
 
     @pytest.mark.asyncio
     async def test_invalid_json_raises_value_error(self, client):
@@ -118,7 +116,7 @@ class TestGPTClientRetry:
         ) as mock_create:
             result = await client.review("sys", "usr")
 
-        assert result.score == 8
+        assert result.spec_status == SpecStatus.PRESENT
         assert mock_create.call_count == 3
 
     @pytest.mark.asyncio

@@ -1,55 +1,49 @@
-from src.review.rules.loader import load_config_from_yaml, DEFAULT_CONFIG
+from src.review.config_loader import load_config_from_yaml, DEFAULT_CONFIG
 from src.models.config import ReviewConfig
 
 
 class TestLoadConfig:
     def test_default_config(self):
         assert isinstance(DEFAULT_CONFIG, ReviewConfig)
-        assert DEFAULT_CONFIG.rules.security is True
+        assert DEFAULT_CONFIG.model is None
+        assert DEFAULT_CONFIG.ignore.files == []
 
     def test_load_yaml_full(self):
         yaml_content = """
 review:
-  language: english
-  severity_threshold: high
   model: gpt-5.4-mini
-
-rules:
-  architecture: true
-  security: true
-  code_quality: false
-
-custom_rules:
-  - "All endpoints must have auth middleware"
 
 ignore:
   files:
     - "*.lock"
+    - "dist/**"
   extensions:
     - ".md"
-
-approve_criteria:
-  max_high_issues: 0
-  max_medium_issues: 5
 """
         config = load_config_from_yaml(yaml_content)
-        assert config.review_language == "english"
         assert config.model == "gpt-5.4-mini"
-        assert config.rules.code_quality is False
-        assert config.rules.security is True
-        assert "All endpoints must have auth middleware" in config.custom_rules
         assert "*.lock" in config.ignore.files
-        assert config.approve_criteria.max_medium_issues == 5
+        assert "dist/**" in config.ignore.files
+        assert ".md" in config.ignore.extensions
 
     def test_partial_yaml_uses_defaults(self):
         yaml_content = """
-rules:
-  security: false
+review:
+  model: gpt-x
 """
         config = load_config_from_yaml(yaml_content)
-        assert config.rules.security is False
-        assert config.rules.code_quality is True  # default
+        assert config.model == "gpt-x"
+        assert config.ignore.files == []
 
     def test_empty_yaml_returns_default(self):
         config = load_config_from_yaml("")
         assert config == DEFAULT_CONFIG
+
+    def test_only_ignore_section(self):
+        yaml_content = """
+ignore:
+  extensions: [".md"]
+"""
+        config = load_config_from_yaml(yaml_content)
+        assert config.model is None
+        assert config.ignore.extensions == [".md"]
