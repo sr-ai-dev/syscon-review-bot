@@ -16,6 +16,15 @@ class TestBuildSystemPrompt:
         assert "missing" in prompt
         assert "PRESENT" in prompt or "present" in prompt
 
+    def test_spec_sources_include_doc_files_in_diff(self):
+        """스펙 위치 둘 다 인식: PR 본문 + diff에 포함된 문서 파일."""
+        prompt = build_system_prompt()
+        # PR 본문 출처
+        assert "본문" in prompt
+        # diff 안의 문서 파일 출처 (.md 같은)
+        assert ("문서 파일" in prompt or "doc" in prompt.lower())
+        assert ".md" in prompt or "변경 사항" in prompt
+
     def test_includes_korean_output_directive(self):
         prompt = build_system_prompt()
         assert "한국어" in prompt or "korean" in prompt.lower()
