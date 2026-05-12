@@ -1,5 +1,5 @@
-name: 'Syscon AI Code Review'
-description: 'Auto code review on PRs using OpenAI GPT — multi-language support'
+name: 'Syscon Spec Alignment Review'
+description: 'PR이 명시한 스펙·요구사항과 코드 변경의 정합성을 자동 검토'
 author: 'sr-ai-dev'
 branding:
   icon: 'check-circle'

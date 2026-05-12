@@ -1,4 +1,4 @@
-name: AI Code Review
+name: Spec Alignment Review
 
 on:
   pull_request:
@@ -19,5 +19,5 @@ jobs:
         with:
           openai-key: ${{ secrets.OPENAI_API_KEY }}
           # github-token defaults to ${{ github.token }}
-          # model: gpt-5-mini       # optional — overrides config.review.model
+          # model: gpt-5.4-mini    # optional — overrides config.review.model
           # config-path: .github/review-bot.yml   # optional

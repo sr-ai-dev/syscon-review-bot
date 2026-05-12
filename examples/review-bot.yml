@@ -1,5 +1,5 @@
 # 소비자 레포의 .github/review-bot.yml로 복사해서 사용.
-# 모든 항목은 선택사항이며, 미지정 시 봇이 기본값으로 동작한다.
+# 모든 항목 선택사항. 미지정 시 봇 기본값 동작.
 
 review:
   # model: gpt-5.4-mini    # 미설정 시 액션 input의 model → GPTClient 기본값 순으로 적용
@@ -9,6 +9,6 @@ ignore:                    # 정합성 검토 대상에서 제외할 파일
     - "*.lock"
     - "dist/**"
     - "**/*.generated.*"
+  # extensions에 `.md`는 넣지 말 것 — 스펙 문서가 .md인 경우 봇이 읽지 못함
   extensions:
-    - ".md"
     - ".txt"
