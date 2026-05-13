@@ -73,6 +73,12 @@ class TestBuildSystemPrompt:
         assert "의도" in prompt
         assert ("형식" in prompt or "동작" in prompt or "결과" in prompt)
 
+    def test_implicit_reference_patterns_listed(self):
+        prompt = build_system_prompt()
+        assert "암묵" in prompt
+        assert ("매크로" in prompt or "자동 구독" in prompt or "자동 inject" in prompt or "re-export" in prompt or "타입 전용" in prompt)
+        assert "false positive" in prompt or "신뢰" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
