@@ -23,6 +23,24 @@ class Mismatch(BaseModel):
     suggestion: str
 
 
+class FindingCategory(str, Enum):
+    BUG = "bug"
+    VULNERABILITY = "vulnerability"
+    SECURITY = "security"
+    SMELL = "smell"
+    COMPLEXITY = "complexity"
+
+
+class QualityFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: FindingCategory
+    file: str | None = None
+    line: int | None = None
+    description: str
+    suggestion: str
+
+
 class ReviewResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -31,3 +49,4 @@ class ReviewResult(BaseModel):
     summary: str
     mismatches: list[Mismatch] = Field(default_factory=list)
     architecture_concern: str = ""
+    quality_findings: list[QualityFinding] = Field(default_factory=list)
