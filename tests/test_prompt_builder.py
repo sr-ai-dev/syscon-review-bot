@@ -62,6 +62,23 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt()
         assert ("묶" in prompt or "1개로" in prompt or "여러 파일에 적용" in prompt)
 
+    def test_includes_scope_distinction_directive(self):
+        prompt = build_system_prompt()
+        assert "적용" in prompt
+        assert "제외" in prompt
+        assert "도메인" in prompt or "폴더" in prompt or "자동으로" in prompt
+
+    def test_intended_changes_not_mismatch(self):
+        prompt = build_system_prompt()
+        assert "의도" in prompt
+        assert ("형식" in prompt or "동작" in prompt or "결과" in prompt)
+
+    def test_implicit_reference_patterns_listed(self):
+        prompt = build_system_prompt()
+        assert "암묵" in prompt
+        assert ("매크로" in prompt or "자동 구독" in prompt or "자동 inject" in prompt or "re-export" in prompt or "타입 전용" in prompt)
+        assert "false positive" in prompt or "신뢰" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
