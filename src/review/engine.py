@@ -69,7 +69,10 @@ async def review_pr(
 
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
     bot_reviews = filter_bot_reviews(raw_reviews)
-    previous_reviews = [r["body"] for r in bot_reviews]
+    previous_reviews = [
+        f"시각 {r.get('submitted_at') or '?'} | 커밋 {(r.get('commit_id') or '')[:8] or '?'}"
+        for r in bot_reviews
+    ]
 
     last_bot_review_time = None
     bot_logins: set[str] = set()

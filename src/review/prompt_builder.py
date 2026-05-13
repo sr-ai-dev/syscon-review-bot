@@ -120,16 +120,16 @@ def build_user_prompt(
         parts.append("")
 
     if previous_reviews:
-        parts.append("## 이전 리뷰 기록 (참고용)")
+        parts.append("## 이전 봇 리뷰 (메타데이터만 — 본문 의도적 제외)")
         parts.append(
-            "아래는 이전 커밋에 대해 너가 작성한 리뷰다. **진리는 위의 현재 PR 본문과 변경 사항**이며, "
-            "이전 리뷰는 참고 자료다. 본문이나 코드가 변경됐으면 매번 현재 상태와 언어·프레임워크 컨벤션을 "
-            "기준으로 다시 판단하라. 자기 과거 발언에 매이지 말고, 현재 상태에 맞지 않으면 이전 결론을 뒤집어도 된다."
+            "아래는 이 PR에서 너가 작성했던 봇 리뷰들의 메타데이터다 (시각·커밋). "
+            "이전 리뷰 본문은 의도적으로 제외했다 — 그 텍스트를 베껴 다시 출력하지 말고, "
+            "매번 현재 PR 본문과 코드 변경을 기준으로 새로 추출하라. 본문이나 코드가 변경됐으면 "
+            "새 상태와 언어·프레임워크 컨벤션을 기준으로 다시 판단하라. 자기 과거 발언에 매이지 마라. "
+            "사람의 응답 의사는 아래 \"사람 코멘트\" 섹션에 그대로 들어 있으니 그쪽만 참고하라."
         )
-        for review in previous_reviews:
-            parts.append("")
-            parts.append("---")
-            parts.append(review)
+        for entry in previous_reviews:
+            parts.append(f"- {entry}")
 
     if human_comments:
         parts.append("")
