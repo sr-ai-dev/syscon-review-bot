@@ -29,14 +29,22 @@ def missing_spec_result():
 def make_get_json_dispatch(
     pr_info: dict | None = None,
     reviews: list[dict] | None = None,
+    issue_comments: list[dict] | None = None,
+    review_comments: list[dict] | None = None,
 ):
     pr_info = pr_info or {
         "title": "T", "body": "B",
         "head": {"ref": "feat"}, "base": {"ref": "main"},
     }
     reviews = reviews or []
+    issue_comments = issue_comments or []
+    review_comments = review_comments or []
 
     async def dispatch(path):
+        if "/issues/" in path and path.endswith("/comments"):
+            return issue_comments
+        if "/pulls/" in path and path.endswith("/comments"):
+            return review_comments
         if path.endswith("/reviews"):
             return reviews
         return pr_info
@@ -179,3 +187,91 @@ async def test_review_pr_dry_run_skips_gpt_and_submit(context, capsys):
     out = capsys.readouterr().out
     assert "SYSTEM PROMPT" in out and "USER PROMPT" in out
     assert "정합성" in out
+
+
+@pytest.mark.asyncio
+async def test_review_pr_includes_human_comments_after_last_bot_review(context, aligned_result):
+    bot_login = "github-actions[bot]"
+    last_review_time = "2026-05-13T10:00:00Z"
+    reviews = [
+        {
+            "body": "## 🤖 스펙 정합성 리뷰\nprev",
+            "user": {"login": bot_login},
+            "submitted_at": last_review_time,
+        }
+    ]
+    issue_comments = [
+        {
+            "body": "이건 의도다",
+            "user": {"login": "alice"},
+            "created_at": "2026-05-13T11:00:00Z",
+        },
+        {
+            "body": "오래된 토론",
+            "user": {"login": "alice"},
+            "created_at": "2026-05-13T09:00:00Z",
+        },
+        {
+            "body": "봇 본인",
+            "user": {"login": bot_login},
+            "created_at": "2026-05-13T11:30:00Z",
+        },
+    ]
+    review_comments = [
+        {
+            "body": "라인 답글: 정상 동작",
+            "user": {"login": "bob"},
+            "path": "src/x.py",
+            "line": 10,
+            "created_at": "2026-05-13T11:15:00Z",
+        },
+    ]
+    captured = {}
+
+    async def fake_review(system, user, model=None):
+        captured["user"] = user
+        return aligned_result
+
+    mock_github = _mock_github(
+        reviews=reviews,
+        issue_comments=issue_comments,
+        review_comments=review_comments,
+    )
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+        await review_pr(context, mock_github, mock_gpt)
+
+    user_prompt = captured["user"]
+    assert "사람 코멘트" in user_prompt
+    assert "이건 의도다" in user_prompt
+    assert "라인 답글: 정상 동작" in user_prompt
+    assert "src/x.py:10" in user_prompt
+    assert "오래된 토론" not in user_prompt
+    assert "봇 본인" not in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_review_pr_includes_all_comments_when_no_prior_bot_review(context, aligned_result):
+    issue_comments = [
+        {
+            "body": "PR 설명 보충",
+            "user": {"login": "alice"},
+            "created_at": "2026-05-13T09:00:00Z",
+        },
+    ]
+    captured = {}
+
+    async def fake_review(system, user, model=None):
+        captured["user"] = user
+        return aligned_result
+
+    mock_github = _mock_github(reviews=[], issue_comments=issue_comments, review_comments=[])
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert "PR 설명 보충" in captured["user"]
