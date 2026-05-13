@@ -2,7 +2,14 @@ import logging
 from dataclasses import dataclass
 
 from src.github.client import GitHubClient
-from src.github.pr import get_pr_diff, get_pr_info, get_pr_reviews, get_repo_file
+from src.github.pr import (
+    get_pr_diff,
+    get_pr_info,
+    get_pr_reviews,
+    get_pr_issue_comments,
+    get_pr_review_comments,
+    get_repo_file,
+)
 from src.github.reviewer import filter_bot_reviews, submit_review
 from src.models.config import ReviewConfig
 from src.review.decision import compute_decision
@@ -61,7 +68,28 @@ async def review_pr(
         return
 
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
-    previous_reviews = [r["body"] for r in filter_bot_reviews(raw_reviews)]
+    bot_reviews = filter_bot_reviews(raw_reviews)
+    previous_reviews = [r["body"] for r in bot_reviews]
+
+    last_bot_review_time = None
+    bot_logins: set[str] = set()
+    if bot_reviews:
+        last_bot_review_time = max((r.get("submitted_at") or "") for r in bot_reviews) or None
+        bot_logins = {
+            (r.get("user") or {}).get("login")
+            for r in bot_reviews
+            if (r.get("user") or {}).get("login")
+        }
+
+    issue_comments_raw = await get_pr_issue_comments(
+        github_client, context.repo, context.pr_number
+    )
+    review_comments_raw = await get_pr_review_comments(
+        github_client, context.repo, context.pr_number
+    )
+    human_comments = _filter_and_format_comments(
+        issue_comments_raw, review_comments_raw, last_bot_review_time, bot_logins
+    )
 
     system_prompt = build_system_prompt()
     user_prompt = build_user_prompt(
@@ -71,6 +99,7 @@ async def review_pr(
         base_branch=pr_info["base"]["ref"],
         head_branch=pr_info["head"]["ref"],
         previous_reviews=previous_reviews,
+        human_comments=human_comments,
     )
 
     if dry_run:
@@ -92,3 +121,48 @@ async def review_pr(
         f"spec_status={result.spec_status.value}, aligned={result.aligned}, "
         f"decision={decision.value}"
     )
+
+
+def _filter_and_format_comments(
+    issue_comments: list[dict],
+    review_comments: list[dict],
+    after_time: str | None,
+    bot_logins: set[str],
+) -> list[str]:
+    """봇 리뷰 시각 이후 + 봇이 아닌 작성자의 코멘트만 압축 문자열로."""
+    items: list[tuple[str, str]] = []
+
+    for c in issue_comments:
+        login = (c.get("user") or {}).get("login")
+        if not login or login in bot_logins:
+            continue
+        created = c.get("created_at") or ""
+        if after_time and created <= after_time:
+            continue
+        body = (c.get("body") or "").strip()
+        if not body:
+            continue
+        items.append((created, f"@{login}: {body}"))
+
+    for c in review_comments:
+        login = (c.get("user") or {}).get("login")
+        if not login or login in bot_logins:
+            continue
+        created = c.get("created_at") or ""
+        if after_time and created <= after_time:
+            continue
+        body = (c.get("body") or "").strip()
+        if not body:
+            continue
+        path = c.get("path")
+        line = c.get("line") or c.get("original_line")
+        if path and line:
+            loc = f" ({path}:{line})"
+        elif path:
+            loc = f" ({path})"
+        else:
+            loc = ""
+        items.append((created, f"@{login}{loc}: {body}"))
+
+    items.sort(key=lambda t: t[0])
+    return [s for _, s in items]

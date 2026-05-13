@@ -42,6 +42,8 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
    - smell: 중복 코드, 너무 긴 메서드, 죽은 코드, 나쁜 네이밍
    - complexity: 순환 복잡도·인지 복잡도 과다
    각 항목은 category, file, line, description, suggestion으로 기록한다. 발견사항이 없으면 quality_findings는 빈 배열로 둔다.
+   검사 시 파일의 언어·프레임워크 문법과 컨벤션을 먼저 인지하라.
+   동일한 description이 여러 파일에 적용되면 finding을 1개로 묶는다. `file`은 null로 두고, description 본문에 영향 받는 파일 목록을 나열한다.
 
 ## 출력 형식
 
@@ -88,6 +90,7 @@ def build_user_prompt(
     base_branch: str,
     head_branch: str,
     previous_reviews: list[str] | None = None,
+    human_comments: list[str] | None = None,
 ) -> str:
     parts = [
         "## PR 정보",
@@ -115,14 +118,27 @@ def build_user_prompt(
     if previous_reviews:
         parts.append("## 이전 리뷰 기록 (참고용)")
         parts.append(
-            "아래는 이전 커밋에 대해 너가 작성한 리뷰다. **진리는 위의 현재 PR 본문과 변경 사항**이고, "
-            "이전 리뷰는 참고 자료에 불과하다. 본문이나 코드가 그 사이 갱신되었으면 새 상태 기준으로 결론을 "
-            "다시 내려라 — 자기 과거 발언에 매이지 말 것. 이미 지적·대응된 항목 재지적은 피하되, "
-            "현재 상태가 명백히 부합하면 이전 결론을 뒤집어도 된다."
+            "아래는 이전 커밋에 대해 너가 작성한 리뷰다. **진리는 위의 현재 PR 본문과 변경 사항**이며, "
+            "이전 리뷰는 참고 자료다. 본문이나 코드가 변경됐으면 매번 현재 상태와 언어·프레임워크 컨벤션을 "
+            "기준으로 다시 판단하라. 자기 과거 발언에 매이지 말고, 현재 상태에 맞지 않으면 이전 결론을 뒤집어도 된다."
         )
         for review in previous_reviews:
             parts.append("")
             parts.append("---")
             parts.append(review)
+
+    if human_comments:
+        parts.append("")
+        parts.append("## 사람 코멘트 (참고용)")
+        parts.append(
+            "아래는 마지막 봇 리뷰 이후 사람이 남긴 코멘트다. 봇 지적에 대한 답일 수 있다.\n\n"
+            "이 코멘트들을 **참고**해서 판단하라 — 결론을 사용자에게 양도하지 마라:\n"
+            "- 코드·언어 컨벤션 관점에서 사람의 설명이 **타당하면** (예: \"Svelte $store는 자동 구독이라 import가 필요\") 넘어가고 다시 지적하지 마라.\n"
+            "- 설명이 **부족하거나 틀렸거나, 근거 없이 거부**한 거라면 다시 지적하라. 미해결 이슈에 침묵하지 마라.\n"
+            "- '확인 중', '다음에 보겠다' 같은 미정 항목은 신중히 판단하라."
+        )
+        for c in human_comments:
+            parts.append("")
+            parts.append(c)
 
     return "\n".join(parts)
