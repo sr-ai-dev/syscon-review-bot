@@ -7,7 +7,14 @@ from src.github.reviewer import (
     format_review_body,
     submit_review,
 )
-from src.models.review import Decision, Mismatch, ReviewResult, SpecStatus
+from src.models.review import (
+    Decision,
+    FindingCategory,
+    Mismatch,
+    QualityFinding,
+    ReviewResult,
+    SpecStatus,
+)
 
 
 def _result_missing():
@@ -102,6 +109,53 @@ class TestFormatReviewBody:
         body = format_review_body(result)
         row = next(line for line in body.split("\n") if "Line1" in line)
         assert "Line2" in row
+
+
+def _result_with_quality_findings():
+    return ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True,
+        summary="스펙 부합하나 코드 품질 이슈 있음",
+        quality_findings=[
+            QualityFinding(
+                category=FindingCategory.BUG, file="src/svc.py", line=12,
+                description="None 가능 값을 검사 없이 사용", suggestion="None 체크 추가",
+            ),
+            QualityFinding(
+                category=FindingCategory.SMELL, file=None, line=None,
+                description="중복 코드 블록", suggestion="공통 함수 추출",
+            ),
+        ],
+    )
+
+
+class TestFormatReviewBodyQuality:
+    def test_quality_section_lists_findings(self):
+        body = format_review_body(_result_with_quality_findings())
+        assert "코드 품질" in body
+        assert "None 가능 값을 검사 없이 사용" in body
+        assert "src/svc.py:12" in body
+        assert "중복 코드 블록" in body
+        assert "버그" in body
+        assert "코드 스멜" in body
+        assert "Request Changes" in body
+
+    def test_quality_section_shows_ok_when_empty(self):
+        body = format_review_body(_result_aligned())
+        assert "코드 품질" in body
+        assert body.count("이상 없음") >= 2
+
+    def test_quality_pipe_escaped(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="s",
+            quality_findings=[
+                QualityFinding(
+                    category=FindingCategory.SMELL, file="x.py", line=1,
+                    description="Use `a | b`", suggestion="Replace `|`",
+                ),
+            ],
+        )
+        body = format_review_body(result)
+        assert r"a \| b" in body
 
 
 class TestFilterBotReviews:
