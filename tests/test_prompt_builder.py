@@ -40,6 +40,19 @@ class TestBuildSystemPrompt:
         assert "아키텍처" in prompt
         assert "architecture_concern" in prompt
 
+    def test_includes_quality_findings_schema(self):
+        prompt = build_system_prompt()
+        assert "quality_findings" in prompt
+
+    def test_includes_sonarqube_categories(self):
+        prompt = build_system_prompt()
+        for cat in ("bug", "vulnerability", "security", "smell", "complexity"):
+            assert cat in prompt
+
+    def test_quality_check_section_present(self):
+        prompt = build_system_prompt()
+        assert ("코드 품질" in prompt or "SonarQube" in prompt)
+
 
 class TestBuildUserPrompt:
     def _files(self):
