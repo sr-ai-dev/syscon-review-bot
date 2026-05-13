@@ -112,15 +112,21 @@ class TestBuildUserPrompt:
         # 일관성 강제하는 옛 표현은 빠져야
         assert "일관성을 유지하라" not in prompt
 
-    def test_previous_reviews_instruct_no_duplicate_findings(self):
+    def test_previous_reviews_do_not_silence_unfixed_findings(self):
+        """이전 리뷰는 단순 참고 — 미해결 이슈 침묵 강제하는 규칙이 없어야."""
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
             previous_reviews=["## 🤖 스펙 정합성 리뷰\n이전지적"],
         )
-        assert "동일" in prompt or "다시 적지" in prompt or "재지적" in prompt
-        assert ("신규" in prompt or "새로 생긴" in prompt or "변경" in prompt)
+        # 잘못된 강한 재출력 금지 표현은 없어야
+        assert "동일한 항목" not in prompt
+        assert "신규/변경분만" not in prompt
+        assert "다시 적지 마라" not in prompt
+        # 현재 코드 + 언어 컨벤션 기준으로 판단
+        assert "현재" in prompt
+        assert ("컨벤션" in prompt or "프레임워크" in prompt)
 
     def test_no_previous_reviews_section_when_empty(self):
         prompt = build_user_prompt(
@@ -148,15 +154,21 @@ class TestBuildUserPrompt:
         assert "사람 코멘트" in prompt
         assert "이건 의도된 동작" in prompt
 
-    def test_human_comments_respect_directive(self):
+    def test_human_comments_judged_by_validity(self):
+        """사람 설명이 타당하면 넘어가고, 부적절하면 계속 지적하라는 가이드."""
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
             human_comments=["@alice: 거부"],
         )
-        assert "의도" in prompt
-        assert ("거부" in prompt or "won't fix" in prompt or "다시 지적하지" in prompt)
+        # 판단 위임 아님 — 봇이 타당성 판단
+        assert "타당" in prompt
+        # 부적절한 응답이면 계속 지적
+        assert ("부족" in prompt or "틀렸" in prompt or "근거 없" in prompt)
+        assert "다시 지적" in prompt
+        # 침묵 강제 아님
+        assert "미해결" in prompt or "침묵" in prompt
 
     def test_no_human_comments_section_when_empty(self):
         prompt = build_user_prompt(
