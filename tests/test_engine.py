@@ -135,7 +135,12 @@ async def test_review_pr_includes_previous_bot_reviews_in_prompt(context, aligne
     human_body = "human reviewer comment"
 
     mock_github = _mock_github(reviews=[
-        {"body": bot_body, "user": {"login": "github-actions[bot]"}},
+        {
+            "body": bot_body,
+            "user": {"login": "github-actions[bot]"},
+            "submitted_at": "2026-05-13T10:00:00Z",
+            "commit_id": "abc1234567",
+        },
         {"body": human_body, "user": {"login": "alice"}},
     ])
     mock_gpt = AsyncMock()
@@ -148,8 +153,44 @@ async def test_review_pr_includes_previous_bot_reviews_in_prompt(context, aligne
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     user_prompt = mock_gpt.review.call_args.args[1]
-    assert "이전지적사항" in user_prompt
+    # 메타데이터만 들어가야: 본문 텍스트가 아니라 시각·커밋
+    assert "이전 봇 리뷰" in user_prompt
+    assert "abc12345" in user_prompt
+    assert "이전지적사항" not in user_prompt
     assert human_body not in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_review_pr_does_not_leak_previous_review_body(context, aligned_result):
+    """LLM 입력에 이전 봇 리뷰 본문이 들어가지 않음을 보증."""
+    bot_login = "github-actions[bot]"
+    leak_marker = "LEAK_MARKER_THIS_SHOULD_NOT_REACH_LLM"
+    reviews = [
+        {
+            "body": f"## 🤖 스펙 정합성 리뷰\n{leak_marker}",
+            "user": {"login": bot_login},
+            "submitted_at": "2026-05-13T10:00:00Z",
+            "commit_id": "deadbeefcafe1234",
+        }
+    ]
+    captured = {}
+
+    async def fake_review(system, user, model=None):
+        captured["user"] = user
+        return aligned_result
+
+    mock_github = _mock_github(reviews=reviews)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+        await review_pr(context, mock_github, mock_gpt)
+
+    user_prompt = captured["user"]
+    assert leak_marker not in user_prompt, "previous review body leaked into LLM input"
+    # 메타데이터는 들어가야
+    assert "deadbeef" in user_prompt
+    assert "이전 봇 리뷰" in user_prompt
 
 
 @pytest.mark.asyncio
@@ -198,6 +239,7 @@ async def test_review_pr_includes_human_comments_after_last_bot_review(context, 
             "body": "## 🤖 스펙 정합성 리뷰\nprev",
             "user": {"login": bot_login},
             "submitted_at": last_review_time,
+            "commit_id": "feedface12345678",
         }
     ]
     issue_comments = [

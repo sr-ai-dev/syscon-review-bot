@@ -109,41 +109,51 @@ class TestBuildUserPrompt:
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
-            previous_reviews=["## 🤖 코드 리뷰\n이전지적"],
+            previous_reviews=["시각 2026-05-13T06:50:47Z | 커밋 8f426f33"],
         )
-        assert "이전 리뷰" in prompt
-        assert "이전지적" in prompt
+        assert "이전 봇 리뷰" in prompt
+        assert "8f426f33" in prompt
+        # metadata 자체는 들어가지만 본문 텍스트는 패스스루
+        assert "메타데이터" in prompt
 
     def test_previous_reviews_marked_as_reference_not_truth(self):
-        """현재 PR 본문/코드가 진리. 이전 리뷰는 참고만."""
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
-            previous_reviews=["## 🤖 코드 리뷰\nold"],
+            previous_reviews=["시각 2026-05-13T06:50:47Z | 커밋 abc"],
         )
-        # 우선순위 명시
-        assert "참고" in prompt
-        # 본문/코드 갱신 시 결론 갱신 가능 명시
-        assert ("갱신" in prompt or "최신" in prompt or "변경" in prompt)
-        # 일관성 강제하는 옛 표현은 빠져야
+        # 본문 제외 명시
+        assert "본문 의도적 제외" in prompt or "본문은 의도적으로" in prompt
+        # 현재 기준 재판단 명시
+        assert ("현재" in prompt) and ("변경" in prompt or "새로" in prompt)
+        # 일관성 강제 옛 표현 금지
         assert "일관성을 유지하라" not in prompt
 
     def test_previous_reviews_do_not_silence_unfixed_findings(self):
-        """이전 리뷰는 단순 참고 — 미해결 이슈 침묵 강제하는 규칙이 없어야."""
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
-            previous_reviews=["## 🤖 스펙 정합성 리뷰\n이전지적"],
+            previous_reviews=["시각 X | 커밋 abc"],
         )
         # 잘못된 강한 재출력 금지 표현은 없어야
         assert "동일한 항목" not in prompt
         assert "신규/변경분만" not in prompt
-        assert "다시 적지 마라" not in prompt
-        # 현재 코드 + 언어 컨벤션 기준으로 판단
+        # 현재 코드 + 언어 컨벤션 기준
         assert "현재" in prompt
         assert ("컨벤션" in prompt or "프레임워크" in prompt)
+
+    def test_previous_review_body_not_copied_through(self):
+        """본문이 LLM에 흘러들어가지 않음을 보증 — root cause 회귀 방지."""
+        marker_body = "BODY_MARKER_SHOULD_NOT_LEAK_8f426f33"
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            previous_reviews=[f"시각 X | 커밋 abc"],
+        )
+        assert marker_body not in prompt
 
     def test_no_previous_reviews_section_when_empty(self):
         prompt = build_user_prompt(
