@@ -62,6 +62,12 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt()
         assert ("묶" in prompt or "1개로" in prompt or "여러 파일에 적용" in prompt)
 
+    def test_includes_scope_distinction_directive(self):
+        prompt = build_system_prompt()
+        assert "적용" in prompt
+        assert "제외" in prompt
+        assert "도메인" in prompt or "폴더" in prompt or "자동으로" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
