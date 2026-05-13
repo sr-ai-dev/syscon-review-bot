@@ -69,20 +69,11 @@ async def review_pr(
 
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
     bot_reviews = filter_bot_reviews(raw_reviews)
-    previous_reviews = [
-        f"시각 {r.get('submitted_at') or '?'} | 커밋 {(r.get('commit_id') or '')[:8] or '?'}"
+    bot_logins: set[str] = {
+        (r.get("user") or {}).get("login")
         for r in bot_reviews
-    ]
-
-    last_bot_review_time = None
-    bot_logins: set[str] = set()
-    if bot_reviews:
-        last_bot_review_time = max((r.get("submitted_at") or "") for r in bot_reviews) or None
-        bot_logins = {
-            (r.get("user") or {}).get("login")
-            for r in bot_reviews
-            if (r.get("user") or {}).get("login")
-        }
+        if (r.get("user") or {}).get("login")
+    }
 
     issue_comments_raw = await get_pr_issue_comments(
         github_client, context.repo, context.pr_number
@@ -90,8 +81,8 @@ async def review_pr(
     review_comments_raw = await get_pr_review_comments(
         github_client, context.repo, context.pr_number
     )
-    human_comments = _filter_and_format_comments(
-        issue_comments_raw, review_comments_raw, last_bot_review_time, bot_logins
+    conversation_history = _build_conversation_history(
+        bot_reviews, issue_comments_raw, review_comments_raw, bot_logins
     )
 
     system_prompt = build_system_prompt()
@@ -101,8 +92,7 @@ async def review_pr(
         pr_body=pr_info.get("body") or "",
         base_branch=pr_info["base"]["ref"],
         head_branch=pr_info["head"]["ref"],
-        previous_reviews=previous_reviews,
-        human_comments=human_comments,
+        conversation_history=conversation_history,
     )
 
     if dry_run:
@@ -126,34 +116,40 @@ async def review_pr(
     )
 
 
-def _filter_and_format_comments(
+def _build_conversation_history(
+    bot_reviews: list[dict],
     issue_comments: list[dict],
     review_comments: list[dict],
-    after_time: str | None,
     bot_logins: set[str],
 ) -> list[str]:
-    """봇 리뷰 시각 이후 + 봇이 아닌 작성자의 코멘트만 압축 문자열로."""
+    """봇 리뷰(전체 본문) + 사람 코멘트를 시간순 단일 리스트로."""
     items: list[tuple[str, str]] = []
+
+    for r in bot_reviews:
+        submitted = r.get("submitted_at") or ""
+        sha8 = (r.get("commit_id") or "")[:8] or "?"
+        body = (r.get("body") or "").strip()
+        if not body:
+            continue
+        header = f"[{submitted or '?'} | 커밋 {sha8} | 🤖 봇]"
+        items.append((submitted, f"{header}\n{body}"))
 
     for c in issue_comments:
         login = (c.get("user") or {}).get("login")
         if not login or login in bot_logins:
             continue
         created = c.get("created_at") or ""
-        if after_time and created <= after_time:
-            continue
         body = (c.get("body") or "").strip()
         if not body:
             continue
-        items.append((created, f"@{login}: {body}"))
+        header = f"[{created or '?'} | @{login}]"
+        items.append((created, f"{header}\n{body}"))
 
     for c in review_comments:
         login = (c.get("user") or {}).get("login")
         if not login or login in bot_logins:
             continue
         created = c.get("created_at") or ""
-        if after_time and created <= after_time:
-            continue
         body = (c.get("body") or "").strip()
         if not body:
             continue
@@ -165,7 +161,8 @@ def _filter_and_format_comments(
             loc = f" ({path})"
         else:
             loc = ""
-        items.append((created, f"@{login}{loc}: {body}"))
+        header = f"[{created or '?'} | @{login}{loc}]"
+        items.append((created, f"{header}\n{body}"))
 
     items.sort(key=lambda t: t[0])
     return [s for _, s in items]

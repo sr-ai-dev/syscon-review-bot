@@ -93,8 +93,7 @@ def build_user_prompt(
     pr_body: str,
     base_branch: str,
     head_branch: str,
-    previous_reviews: list[str] | None = None,
-    human_comments: list[str] | None = None,
+    conversation_history: list[str] | None = None,
 ) -> str:
     parts = [
         "## PR 정보",
@@ -119,30 +118,20 @@ def build_user_prompt(
             parts.append(f"```diff\n{f.patch}\n```")
         parts.append("")
 
-    if previous_reviews:
-        parts.append("## 이전 봇 리뷰 (메타데이터만 — 본문 의도적 제외)")
-        parts.append(
-            "아래는 이 PR에서 너가 작성했던 봇 리뷰들의 메타데이터다 (시각·커밋). "
-            "이전 리뷰 본문은 의도적으로 제외했다 — 그 텍스트를 베껴 다시 출력하지 말고, "
-            "매번 현재 PR 본문과 코드 변경을 기준으로 새로 추출하라. 본문이나 코드가 변경됐으면 "
-            "새 상태와 언어·프레임워크 컨벤션을 기준으로 다시 판단하라. 자기 과거 발언에 매이지 마라. "
-            "사람의 응답 의사는 아래 \"사람 코멘트\" 섹션에 그대로 들어 있으니 그쪽만 참고하라."
-        )
-        for entry in previous_reviews:
-            parts.append(f"- {entry}")
-
-    if human_comments:
+    if conversation_history:
         parts.append("")
-        parts.append("## 사람 코멘트 (참고용)")
+        parts.append("## PR 대화 히스토리 (참고 맥락)")
         parts.append(
-            "아래는 마지막 봇 리뷰 이후 사람이 남긴 코멘트다. 봇 지적에 대한 답일 수 있다.\n\n"
-            "이 코멘트들을 **참고**해서 판단하라 — 결론을 사용자에게 양도하지 마라:\n"
-            "- 코드·언어 컨벤션 관점에서 사람의 설명이 **타당하면** (예: \"Svelte $store는 자동 구독이라 import가 필요\") 넘어가고 다시 지적하지 마라.\n"
-            "- 설명이 **부족하거나 틀렸거나, 근거 없이 거부**한 거라면 다시 지적하라. 미해결 이슈에 침묵하지 마라.\n"
-            "- '확인 중', '다음에 보겠다' 같은 미정 항목은 신중히 판단하라."
+            "위 \"## 변경 사항\"의 diff가 진리다. 아래는 이 PR의 대화 히스토리(봇·사람 시간순). "
+            "너는 이 토론을 이어가는 시니어 리뷰어다 — 매번 처음 보는 게 아니라 진행 중인 토론을 이어간다.\n\n"
+            "- **너의 과거 발언을 글자 단위로 복붙하지 마라**. 그건 '내가 어떤 입장을 가졌는지' 알려주는 맥락일 뿐. 결론은 매번 현재 diff를 기준으로 새로 내려라.\n"
+            "- 사람의 코멘트로 '의도/거부/문법상 정상' 등이 표명됐고 그게 코드·컨벤션 관점에서 **타당하면** 그 항목은 다시 지적하지 마라.\n"
+            "- 타당하지 않거나 미응답인 미해결 이슈에는 침묵하지 마라.\n"
+            "- 이전에 다룬 항목이 현재 diff에서 해결됐으면 더 적지 마라."
         )
-        for c in human_comments:
+        for entry in conversation_history:
             parts.append("")
-            parts.append(c)
+            parts.append("---")
+            parts.append(entry)
 
     return "\n".join(parts)
