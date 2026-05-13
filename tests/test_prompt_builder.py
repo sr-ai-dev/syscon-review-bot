@@ -68,6 +68,11 @@ class TestBuildSystemPrompt:
         assert "제외" in prompt
         assert "도메인" in prompt or "폴더" in prompt or "자동으로" in prompt
 
+    def test_intended_changes_not_mismatch(self):
+        prompt = build_system_prompt()
+        assert "의도" in prompt
+        assert ("형식" in prompt or "동작" in prompt or "결과" in prompt)
+
 
 class TestBuildUserPrompt:
     def _files(self):
