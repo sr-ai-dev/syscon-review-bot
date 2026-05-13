@@ -112,6 +112,16 @@ class TestBuildUserPrompt:
         # 일관성 강제하는 옛 표현은 빠져야
         assert "일관성을 유지하라" not in prompt
 
+    def test_previous_reviews_instruct_no_duplicate_findings(self):
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            previous_reviews=["## 🤖 스펙 정합성 리뷰\n이전지적"],
+        )
+        assert "동일" in prompt or "다시 적지" in prompt or "재지적" in prompt
+        assert ("신규" in prompt or "새로 생긴" in prompt or "변경" in prompt)
+
     def test_no_previous_reviews_section_when_empty(self):
         prompt = build_user_prompt(
             files=self._files(),
