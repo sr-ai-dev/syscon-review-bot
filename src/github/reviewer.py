@@ -1,5 +1,5 @@
 from src.github.client import GitHubClient
-from src.models.review import Decision, Mismatch, ReviewResult, SpecStatus
+from src.models.review import Decision, FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus
 from src.review.decision import compute_decision
 
 
@@ -17,12 +17,12 @@ def _escape_table_cell(text: str | None) -> str:
     return " ".join(text.split())
 
 
-def _format_location(m: Mismatch) -> str:
-    if m.file is None:
+def _format_location(item: Mismatch | QualityFinding) -> str:
+    if item.file is None:
         return "_전체 PR_"
-    safe = _escape_table_cell(m.file)
-    if m.line:
-        return f"`{safe}:{m.line}`"
+    safe = _escape_table_cell(item.file)
+    if item.line:
+        return f"`{safe}:{item.line}`"
     return f"`{safe}`"
 
 
@@ -30,6 +30,15 @@ _VERDICT_LABEL = {
     Decision.APPROVE: "✅ 스펙 부합 (Approve)",
     Decision.REQUEST_CHANGES: "❌ 수정 필요 (Request Changes)",
     Decision.COMMENT: "💬 Comment",
+}
+
+
+_CATEGORY_LABEL = {
+    FindingCategory.BUG: "버그",
+    FindingCategory.VULNERABILITY: "취약점",
+    FindingCategory.SECURITY: "보안",
+    FindingCategory.SMELL: "코드 스멜",
+    FindingCategory.COMPLEXITY: "복잡도",
 }
 
 
@@ -60,6 +69,20 @@ def format_review_body(result: ReviewResult) -> str:
     lines.append("### 아키텍처 검토")
     if result.architecture_concern:
         lines.append(f"> {result.architecture_concern}")
+    else:
+        lines.append("> 이상 없음")
+
+    lines.append("")
+    lines.append("### 코드 품질 검사")
+    if result.quality_findings:
+        lines.append("| # | 분류 | 항목 | 위치 | 제안 |")
+        lines.append("|---|------|------|------|------|")
+        for idx, f in enumerate(result.quality_findings, 1):
+            cat = _CATEGORY_LABEL[f.category]
+            desc = _escape_table_cell(f.description)
+            sugg = _escape_table_cell(f.suggestion)
+            loc = _format_location(f)
+            lines.append(f"| {idx} | {cat} | {desc} | {loc} | {sugg} |")
     else:
         lines.append("> 이상 없음")
 

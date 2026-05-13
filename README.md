@@ -1,6 +1,6 @@
 # Syscon Review Bot
 
-PR이 명시한 **스펙·요구사항**과 실제 코드 변경의 정합성을 자동 검토하는 GitHub Action. 코드 스타일·리팩토링·성능 등은 검토 대상이 아니다.
+PR이 명시한 **스펙·요구사항**과 실제 코드 변경의 정합성을 자동 검토하는 GitHub Action. 더불어 SonarQube 스타일 코드 품질 검사(버그·취약점·보안·코드 스멜·복잡도)도 함께 수행한다.
 
 ## Quick Start
 
@@ -47,6 +47,10 @@ jobs:
 4. **아키텍처 검토** (항상 수행): 레이어 역참조·도메인 무결성 훼손 등 명백한 구조 문제 점검.
    - 우려 0 → 본문에 "이상 없음" 표기
    - 우려 1건+ → 결정이 `❌ Request Changes`로 전환
+5. **코드 품질 검사** (항상 수행, SonarQube 스타일): `bug`·`vulnerability`·`security`·`smell`·`complexity` 항목 점검.
+   - 발견 0 → 본문에 "이상 없음" 표기
+   - `bug`/`vulnerability` 발견 → 결정이 `❌ Request Changes`로 전환
+   - 그 외(`security`/`smell`/`complexity`)만 발견 → 결정이 `💬 Comment`로 전환
 
 ## Configuration (옵션)
 

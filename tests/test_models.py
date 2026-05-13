@@ -1,7 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from src.models.review import Mismatch, ReviewResult, SpecStatus, Decision
+from src.models.review import (
+    Mismatch,
+    ReviewResult,
+    SpecStatus,
+    Decision,
+    QualityFinding,
+    FindingCategory,
+)
 from src.models.config import ReviewConfig, IgnoreConfig
 
 
@@ -80,6 +87,65 @@ class TestReviewResult:
                 spec_status=SpecStatus.PRESENT, aligned=True, summary="x",
                 score=8,  # 폐기된 필드
             )
+
+
+class TestQualityFinding:
+    def test_create_with_category_and_location(self):
+        f = QualityFinding(
+            category=FindingCategory.BUG,
+            file="src/api/auth.py",
+            line=42,
+            description="None일 수 있는 user를 검사 없이 역참조",
+            suggestion="None 체크 추가",
+        )
+        assert f.category == FindingCategory.BUG
+        assert f.file == "src/api/auth.py"
+        assert f.line == 42
+
+    def test_create_without_location(self):
+        f = QualityFinding(
+            category=FindingCategory.SMELL,
+            file=None, line=None,
+            description="중복 코드 블록",
+            suggestion="공통 함수로 추출",
+        )
+        assert f.file is None and f.line is None
+
+    def test_category_values(self):
+        assert {c.value for c in FindingCategory} == {
+            "bug", "vulnerability", "security", "smell", "complexity",
+        }
+
+    def test_extra_field_forbidden(self):
+        with pytest.raises(ValidationError):
+            QualityFinding(
+                category=FindingCategory.BUG,
+                description="d", suggestion="s",
+                severity="critical",
+            )
+
+
+class TestReviewResultQualityFindings:
+    def test_quality_findings_default_empty(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+        )
+        assert result.quality_findings == []
+
+    def test_quality_findings_accepted(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+            quality_findings=[
+                QualityFinding(
+                    category=FindingCategory.VULNERABILITY,
+                    file="src/db.py", line=10,
+                    description="문자열 포매팅으로 SQL 구성",
+                    suggestion="파라미터 바인딩 사용",
+                ),
+            ],
+        )
+        assert len(result.quality_findings) == 1
+        assert result.quality_findings[0].category == FindingCategory.VULNERABILITY
 
 
 class TestDecisionEnum:
