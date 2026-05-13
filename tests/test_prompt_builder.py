@@ -104,65 +104,6 @@ class TestBuildUserPrompt:
         assert "a.py" in prompt
         assert "+x" in prompt
 
-    def test_previous_reviews_section_included_when_present(self):
-        prompt = build_user_prompt(
-            files=self._files(),
-            pr_title="t", pr_body="b",
-            base_branch="main", head_branch="f",
-            previous_reviews=["시각 2026-05-13T06:50:47Z | 커밋 8f426f33"],
-        )
-        assert "이전 봇 리뷰" in prompt
-        assert "8f426f33" in prompt
-        # metadata 자체는 들어가지만 본문 텍스트는 패스스루
-        assert "메타데이터" in prompt
-
-    def test_previous_reviews_marked_as_reference_not_truth(self):
-        prompt = build_user_prompt(
-            files=self._files(),
-            pr_title="t", pr_body="b",
-            base_branch="main", head_branch="f",
-            previous_reviews=["시각 2026-05-13T06:50:47Z | 커밋 abc"],
-        )
-        # 본문 제외 명시
-        assert "본문 의도적 제외" in prompt or "본문은 의도적으로" in prompt
-        # 현재 기준 재판단 명시
-        assert ("현재" in prompt) and ("변경" in prompt or "새로" in prompt)
-        # 일관성 강제 옛 표현 금지
-        assert "일관성을 유지하라" not in prompt
-
-    def test_previous_reviews_do_not_silence_unfixed_findings(self):
-        prompt = build_user_prompt(
-            files=self._files(),
-            pr_title="t", pr_body="b",
-            base_branch="main", head_branch="f",
-            previous_reviews=["시각 X | 커밋 abc"],
-        )
-        # 잘못된 강한 재출력 금지 표현은 없어야
-        assert "동일한 항목" not in prompt
-        assert "신규/변경분만" not in prompt
-        # 현재 코드 + 언어 컨벤션 기준
-        assert "현재" in prompt
-        assert ("컨벤션" in prompt or "프레임워크" in prompt)
-
-    def test_previous_review_body_not_copied_through(self):
-        """본문이 LLM에 흘러들어가지 않음을 보증 — root cause 회귀 방지."""
-        marker_body = "BODY_MARKER_SHOULD_NOT_LEAK_8f426f33"
-        prompt = build_user_prompt(
-            files=self._files(),
-            pr_title="t", pr_body="b",
-            base_branch="main", head_branch="f",
-            previous_reviews=[f"시각 X | 커밋 abc"],
-        )
-        assert marker_body not in prompt
-
-    def test_no_previous_reviews_section_when_empty(self):
-        prompt = build_user_prompt(
-            files=self._files(),
-            pr_title="t", pr_body="b",
-            base_branch="main", head_branch="f",
-        )
-        assert "이전 리뷰" not in prompt
-
     def test_large_file_truncated(self):
         large = "\n".join([f"+line {i}" for i in range(600)])
         prompt = build_user_prompt(
@@ -171,36 +112,41 @@ class TestBuildUserPrompt:
         )
         assert "요약" in prompt or "truncated" in prompt.lower()
 
-    def test_human_comments_section_when_present(self):
+    def test_conversation_history_section_when_present(self):
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
-            human_comments=["@alice (src/x.py:10): 이건 의도된 동작입니다"],
+            conversation_history=[
+                "[2026-05-13T06:50:47Z | 커밋 8f426f33 | 🤖 봇]\n## 🤖 스펙 정합성 리뷰\n이전 본문 내용",
+                "[2026-05-13T06:55:00Z | @alice (src/x.py:10)]\n이건 의도된 동작입니다",
+            ],
         )
-        assert "사람 코멘트" in prompt
-        assert "이건 의도된 동작" in prompt
+        assert "PR 대화 히스토리" in prompt
+        assert "이전 본문 내용" in prompt
+        assert "이건 의도된 동작입니다" in prompt
+        assert "src/x.py:10" in prompt
 
-    def test_human_comments_judged_by_validity(self):
-        """사람 설명이 타당하면 넘어가고, 부적절하면 계속 지적하라는 가이드."""
+    def test_conversation_history_framing(self):
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
-            human_comments=["@alice: 거부"],
+            conversation_history=["[2026-05-13T06:50:47Z | 커밋 abc | 🤖 봇]\n과거 발언"],
         )
-        # 판단 위임 아님 — 봇이 타당성 판단
+        # diff가 진리, 히스토리는 맥락
+        assert "진리" in prompt
+        # 복붙 금지
+        assert "복붙하지" in prompt or "글자 단위" in prompt
+        # 타당하면 무시
         assert "타당" in prompt
-        # 부적절한 응답이면 계속 지적
-        assert ("부족" in prompt or "틀렸" in prompt or "근거 없" in prompt)
-        assert "다시 지적" in prompt
-        # 침묵 강제 아님
-        assert "미해결" in prompt or "침묵" in prompt
+        # 미해결 침묵 금지
+        assert "침묵" in prompt or "미해결" in prompt
 
-    def test_no_human_comments_section_when_empty(self):
+    def test_no_conversation_section_when_empty(self):
         prompt = build_user_prompt(
             files=self._files(),
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
         )
-        assert "사람 코멘트" not in prompt
+        assert "PR 대화 히스토리" not in prompt

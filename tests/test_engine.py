@@ -130,47 +130,90 @@ async def test_review_pr_skips_empty_diff(context):
 
 
 @pytest.mark.asyncio
-async def test_review_pr_includes_previous_bot_reviews_in_prompt(context, aligned_result):
-    bot_body = "## 🤖 스펙 정합성 리뷰\n이전지적사항"
-    human_body = "human reviewer comment"
-
-    mock_github = _mock_github(reviews=[
+async def test_review_pr_passes_unified_conversation_history(context, aligned_result):
+    bot_login = "github-actions[bot]"
+    reviews = [
         {
-            "body": bot_body,
-            "user": {"login": "github-actions[bot]"},
-            "submitted_at": "2026-05-13T10:00:00Z",
-            "commit_id": "abc1234567",
+            "body": "## 🤖 스펙 정합성 리뷰\nFIRST_BOT_BODY",
+            "user": {"login": bot_login},
+            "submitted_at": "2026-05-13T06:50:00Z",
+            "commit_id": "abcdef0123456789",
         },
-        {"body": human_body, "user": {"login": "alice"}},
-    ])
+        {
+            "body": "## 🤖 스펙 정합성 리뷰\nSECOND_BOT_BODY",
+            "user": {"login": bot_login},
+            "submitted_at": "2026-05-13T07:10:00Z",
+            "commit_id": "fedcba9876543210",
+        },
+    ]
+    issue_comments = [
+        {
+            "body": "HUMAN_ISSUE_REPLY",
+            "user": {"login": "alice"},
+            "created_at": "2026-05-13T06:55:00Z",
+        },
+    ]
+    review_comments = [
+        {
+            "body": "HUMAN_LINE_REPLY",
+            "user": {"login": "bob"},
+            "path": "src/y.py",
+            "line": 20,
+            "created_at": "2026-05-13T07:00:00Z",
+        },
+    ]
+    captured = {}
+
+    async def fake_review(system, user, model=None):
+        captured["user"] = user
+        return aligned_result
+
+    mock_github = _mock_github(
+        reviews=reviews,
+        issue_comments=issue_comments,
+        review_comments=review_comments,
+    )
     mock_gpt = AsyncMock()
-    mock_gpt.review.return_value = aligned_result
+    mock_gpt.review.side_effect = fake_review
 
-    with patch(
-        "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
-    ):
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+        await review_pr(context, mock_github, mock_gpt)
 
-    user_prompt = mock_gpt.review.call_args.args[1]
-    # 메타데이터만 들어가야: 본문 텍스트가 아니라 시각·커밋
-    assert "이전 봇 리뷰" in user_prompt
-    assert "abc12345" in user_prompt
-    assert "이전지적사항" not in user_prompt
-    assert human_body not in user_prompt
+    user_prompt = captured["user"]
+    # 통합 섹션 헤더
+    assert "PR 대화 히스토리" in user_prompt
+    # 봇 본문 전체 포함
+    assert "FIRST_BOT_BODY" in user_prompt
+    assert "SECOND_BOT_BODY" in user_prompt
+    # 사람 코멘트 본문 포함
+    assert "HUMAN_ISSUE_REPLY" in user_prompt
+    assert "HUMAN_LINE_REPLY" in user_prompt
+    # 라인 위치
+    assert "src/y.py:20" in user_prompt
+    # 시간순: FIRST_BOT(06:50) < HUMAN_ISSUE(06:55) < HUMAN_LINE(07:00) < SECOND_BOT(07:10)
+    pos_first = user_prompt.index("FIRST_BOT_BODY")
+    pos_issue = user_prompt.index("HUMAN_ISSUE_REPLY")
+    pos_line = user_prompt.index("HUMAN_LINE_REPLY")
+    pos_second = user_prompt.index("SECOND_BOT_BODY")
+    assert pos_first < pos_issue < pos_line < pos_second
 
 
 @pytest.mark.asyncio
-async def test_review_pr_does_not_leak_previous_review_body(context, aligned_result):
-    """LLM 입력에 이전 봇 리뷰 본문이 들어가지 않음을 보증."""
+async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_result):
     bot_login = "github-actions[bot]"
-    leak_marker = "LEAK_MARKER_THIS_SHOULD_NOT_REACH_LLM"
     reviews = [
         {
-            "body": f"## 🤖 스펙 정합성 리뷰\n{leak_marker}",
+            "body": "## 🤖 스펙 정합성 리뷰\nbot review",
             "user": {"login": bot_login},
-            "submitted_at": "2026-05-13T10:00:00Z",
-            "commit_id": "deadbeefcafe1234",
+            "submitted_at": "2026-05-13T06:50:00Z",
+            "commit_id": "abcdef01",
+        }
+    ]
+    issue_comments = [
+        {
+            "body": "BOT_SELF_ISSUE_COMMENT",
+            "user": {"login": bot_login},
+            "created_at": "2026-05-13T06:55:00Z",
         }
     ]
     captured = {}
@@ -179,18 +222,18 @@ async def test_review_pr_does_not_leak_previous_review_body(context, aligned_res
         captured["user"] = user
         return aligned_result
 
-    mock_github = _mock_github(reviews=reviews)
+    mock_github = _mock_github(
+        reviews=reviews,
+        issue_comments=issue_comments,
+        review_comments=[],
+    )
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
     with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
         await review_pr(context, mock_github, mock_gpt)
 
-    user_prompt = captured["user"]
-    assert leak_marker not in user_prompt, "previous review body leaked into LLM input"
-    # 메타데이터는 들어가야
-    assert "deadbeef" in user_prompt
-    assert "이전 봇 리뷰" in user_prompt
+    assert "BOT_SELF_ISSUE_COMMENT" not in captured["user"]
 
 
 @pytest.mark.asyncio
@@ -231,41 +274,22 @@ async def test_review_pr_dry_run_skips_gpt_and_submit(context, capsys):
 
 
 @pytest.mark.asyncio
-async def test_review_pr_includes_human_comments_after_last_bot_review(context, aligned_result):
+async def test_review_pr_includes_all_comments_regardless_of_timing(context, aligned_result):
+    """Whole-thread mode: comments before bot reviews are kept too."""
     bot_login = "github-actions[bot]"
-    last_review_time = "2026-05-13T10:00:00Z"
     reviews = [
         {
-            "body": "## 🤖 스펙 정합성 리뷰\nprev",
+            "body": "## 🤖 스펙 정합성 리뷰\nlate bot review",
             "user": {"login": bot_login},
-            "submitted_at": last_review_time,
+            "submitted_at": "2026-05-13T10:00:00Z",
             "commit_id": "feedface12345678",
         }
     ]
     issue_comments = [
         {
-            "body": "이건 의도다",
-            "user": {"login": "alice"},
-            "created_at": "2026-05-13T11:00:00Z",
-        },
-        {
             "body": "오래된 토론",
             "user": {"login": "alice"},
             "created_at": "2026-05-13T09:00:00Z",
-        },
-        {
-            "body": "봇 본인",
-            "user": {"login": bot_login},
-            "created_at": "2026-05-13T11:30:00Z",
-        },
-    ]
-    review_comments = [
-        {
-            "body": "라인 답글: 정상 동작",
-            "user": {"login": "bob"},
-            "path": "src/x.py",
-            "line": 10,
-            "created_at": "2026-05-13T11:15:00Z",
         },
     ]
     captured = {}
@@ -277,7 +301,7 @@ async def test_review_pr_includes_human_comments_after_last_bot_review(context, 
     mock_github = _mock_github(
         reviews=reviews,
         issue_comments=issue_comments,
-        review_comments=review_comments,
+        review_comments=[],
     )
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
@@ -286,34 +310,6 @@ async def test_review_pr_includes_human_comments_after_last_bot_review(context, 
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
-    assert "사람 코멘트" in user_prompt
-    assert "이건 의도다" in user_prompt
-    assert "라인 답글: 정상 동작" in user_prompt
-    assert "src/x.py:10" in user_prompt
-    assert "오래된 토론" not in user_prompt
-    assert "봇 본인" not in user_prompt
-
-
-@pytest.mark.asyncio
-async def test_review_pr_includes_all_comments_when_no_prior_bot_review(context, aligned_result):
-    issue_comments = [
-        {
-            "body": "PR 설명 보충",
-            "user": {"login": "alice"},
-            "created_at": "2026-05-13T09:00:00Z",
-        },
-    ]
-    captured = {}
-
-    async def fake_review(system, user, model=None):
-        captured["user"] = user
-        return aligned_result
-
-    mock_github = _mock_github(reviews=[], issue_comments=issue_comments, review_comments=[])
-    mock_gpt = AsyncMock()
-    mock_gpt.review.side_effect = fake_review
-
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
-        await review_pr(context, mock_github, mock_gpt)
-
-    assert "PR 설명 보충" in captured["user"]
+    # No "after last bot review" filter — all comments included
+    assert "오래된 토론" in user_prompt
+    assert "late bot review" in user_prompt
