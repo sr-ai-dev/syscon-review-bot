@@ -53,6 +53,15 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt()
         assert ("코드 품질" in prompt or "SonarQube" in prompt)
 
+    def test_includes_language_awareness_directive(self):
+        prompt = build_system_prompt()
+        assert "언어" in prompt and "프레임워크" in prompt
+        assert "컨벤션" in prompt
+
+    def test_includes_bundling_instruction(self):
+        prompt = build_system_prompt()
+        assert ("묶" in prompt or "1개로" in prompt or "여러 파일에 적용" in prompt)
+
 
 class TestBuildUserPrompt:
     def _files(self):

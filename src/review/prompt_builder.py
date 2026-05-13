@@ -42,6 +42,8 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
    - smell: 중복 코드, 너무 긴 메서드, 죽은 코드, 나쁜 네이밍
    - complexity: 순환 복잡도·인지 복잡도 과다
    각 항목은 category, file, line, description, suggestion으로 기록한다. 발견사항이 없으면 quality_findings는 빈 배열로 둔다.
+   검사 시 파일의 언어·프레임워크 문법과 컨벤션을 먼저 인지하라.
+   동일한 description이 여러 파일에 적용되면 finding을 1개로 묶는다. `file`은 null로 두고, description 본문에 영향 받는 파일 목록을 나열한다.
 
 ## 출력 형식
 
