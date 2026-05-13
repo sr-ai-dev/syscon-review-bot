@@ -90,6 +90,7 @@ def build_user_prompt(
     base_branch: str,
     head_branch: str,
     previous_reviews: list[str] | None = None,
+    human_comments: list[str] | None = None,
 ) -> str:
     parts = [
         "## PR 정보",
@@ -129,5 +130,17 @@ def build_user_prompt(
             parts.append("")
             parts.append("---")
             parts.append(review)
+
+    if human_comments:
+        parts.append("")
+        parts.append("## 사람 코멘트 (참고용)")
+        parts.append(
+            "아래는 마지막 봇 리뷰 이후 사람이 남긴 코멘트다. 봇 지적에 대한 답일 수 있다. "
+            "사용자가 '의도', '문법상 정상', '거부', 'won't fix' 등의 의사를 표명한 항목은 "
+            "다시 지적하지 마라. '확인 중', '다음에 보겠다' 등 미정 항목은 신중히 판단하라."
+        )
+        for c in human_comments:
+            parts.append("")
+            parts.append(c)
 
     return "\n".join(parts)

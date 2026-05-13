@@ -137,3 +137,31 @@ class TestBuildUserPrompt:
             pr_title="t", pr_body="b", base_branch="m", head_branch="f",
         )
         assert "요약" in prompt or "truncated" in prompt.lower()
+
+    def test_human_comments_section_when_present(self):
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            human_comments=["@alice (src/x.py:10): 이건 의도된 동작입니다"],
+        )
+        assert "사람 코멘트" in prompt
+        assert "이건 의도된 동작" in prompt
+
+    def test_human_comments_respect_directive(self):
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            human_comments=["@alice: 거부"],
+        )
+        assert "의도" in prompt
+        assert ("거부" in prompt or "won't fix" in prompt or "다시 지적하지" in prompt)
+
+    def test_no_human_comments_section_when_empty(self):
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+        )
+        assert "사람 코멘트" not in prompt
