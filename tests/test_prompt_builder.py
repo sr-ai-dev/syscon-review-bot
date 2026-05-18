@@ -139,7 +139,7 @@ class TestBuildUserPrompt:
                 "[2026-05-13T06:55:00Z | @alice (src/x.py:10)]\n이건 의도된 동작입니다",
             ],
         )
-        assert "PR 대화 히스토리" in prompt
+        assert "이전 리뷰 & 대화 히스토리" in prompt
         assert "이전 본문 내용" in prompt
         assert "이건 의도된 동작입니다" in prompt
         assert "src/x.py:10" in prompt
@@ -151,14 +151,23 @@ class TestBuildUserPrompt:
             base_branch="main", head_branch="f",
             conversation_history=["[2026-05-13T06:50:47Z | 커밋 abc | 🤖 봇]\n과거 발언"],
         )
-        # diff가 진리, 히스토리는 맥락
+        # diff가 진리
         assert "진리" in prompt
         # 복붙 금지
         assert "복붙하지" in prompt or "글자 단위" in prompt
-        # 타당하면 무시
-        assert "타당" in prompt
-        # 미해결 침묵 금지
-        assert "침묵" in prompt or "미해결" in prompt
+        # 재리뷰 절차 참조
+        assert "재리뷰" in prompt
+
+    def test_conversation_history_framing_re_review(self):
+        """히스토리가 있으면 재리뷰 절차 참조 안내가 포함됨."""
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            conversation_history=["[2026-05-13T06:50:47Z | 커밋 abc | 🤖 봇]\n과거 발언"],
+        )
+        assert "재리뷰" in prompt
+        assert "판정" in prompt or "해결" in prompt
 
     def test_no_conversation_section_when_empty(self):
         prompt = build_user_prompt(
