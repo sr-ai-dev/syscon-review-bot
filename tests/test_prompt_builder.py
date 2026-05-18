@@ -79,6 +79,23 @@ class TestBuildSystemPrompt:
         assert ("매크로" in prompt or "자동 구독" in prompt or "자동 inject" in prompt or "re-export" in prompt or "타입 전용" in prompt)
         assert "false positive" in prompt or "신뢰" in prompt
 
+    def test_includes_re_review_procedure(self):
+        prompt = build_system_prompt()
+        assert "재리뷰" in prompt
+        assert "prior_resolved" in prompt
+
+    def test_re_review_checks_resolution_before_new_issues(self):
+        prompt = build_system_prompt()
+        re_review_pos = prompt.index("재리뷰")
+        review_order_pos = prompt.index("검토 순서")
+        assert re_review_pos < review_order_pos
+
+    def test_re_review_includes_resolution_criteria(self):
+        prompt = build_system_prompt()
+        assert "해결" in prompt
+        assert "반박" in prompt or "반론" in prompt
+        assert "미해결" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
