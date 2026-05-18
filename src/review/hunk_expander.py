@@ -59,19 +59,43 @@ def _parse_hunks(patch: str) -> list[tuple[int, int, str]]:
     cur_start: int | None = None
     cur_lines: int | None = None
     cur_body: list[str] = []
+
+    def _finalize_body(body: list[str]) -> str:
+        # Strip trailing empty strings produced by split on a trailing newline
+        while body and body[-1] == "":
+            body.pop()
+        return "\n".join(body)
+
     for line in patch.split("\n"):
         m = _HUNK_HEADER_RE.match(line)
         if m:
             if cur_start is not None:
-                hunks.append((cur_start, cur_lines or 0, "\n".join(cur_body)))
+                hunks.append((cur_start, cur_lines or 0, _finalize_body(cur_body)))
             cur_start = int(m.group(1))
             cur_lines = int(m.group(2) or "1")
             cur_body = []
         elif cur_start is not None:
             cur_body.append(line)
     if cur_start is not None:
-        hunks.append((cur_start, cur_lines or 0, "\n".join(cur_body)))
+        hunks.append((cur_start, cur_lines or 0, _finalize_body(cur_body)))
     return hunks
+
+
+def _count_body_lines(body: str) -> tuple[int, int]:
+    """Return (old_count, new_count) by counting -/+/' ' prefixes in body."""
+    old, new = 0, 0
+    for line in body.split("\n"):
+        if not line:
+            continue
+        prefix = line[0]
+        if prefix == "-":
+            old += 1
+        elif prefix == "+":
+            new += 1
+        elif prefix == " ":
+            old += 1
+            new += 1
+    return old, new
 
 
 def expand_file_diff(fd: FileDiff, full_source: str, max_lines: int) -> FileDiff:
@@ -107,7 +131,12 @@ def expand_file_diff(fd: FileDiff, full_source: str, max_lines: int) -> FileDiff
         )
         # Lines between expanded start and hunk start (exclusive) become context lines
         prefix_lines = file_lines[expanded.start_line - 1 : new_start - 1]
-        header = f"@@ -{new_start},{new_lines} +{new_start},{new_lines} @@"
+        prefix_count = len(prefix_lines)
+        old_changed, new_changed = _count_body_lines(body)
+        old_count = old_changed + prefix_count
+        new_count = new_changed + prefix_count
+        start = expanded.start_line
+        header = f"@@ -{start},{old_count} +{start},{new_count} @@"
         new_parts.append(header)
         if prefix_lines:
             prefix = "\n".join(" " + line for line in prefix_lines)

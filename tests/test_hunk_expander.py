@@ -1,5 +1,7 @@
+import re
+
 from src.review.diff_parser import FileDiff
-from src.review.hunk_expander import expand_file_diff, expand_hunk_to_header
+from src.review.hunk_expander import expand_file_diff, expand_hunk_to_header, _parse_hunks
 
 PY_FILE = "\n".join([
     "x = 1",                  # 1
@@ -86,3 +88,38 @@ def test_expand_file_diff_includes_function_headers():
     assert "def main():" in expanded.patch
     assert "    x = helper()" in expanded.patch
     assert "y = x + 2" in expanded.patch
+
+
+def test_expand_file_diff_header_has_correct_start_after_expansion():
+    src = "\n".join([
+        "import os",        # 1
+        "",                 # 2
+        "def main():",      # 3
+        "    a = 1",        # 4
+        "    b = 2",        # 5
+        "    return a + b", # 6
+    ])
+    patch = "@@ -6,1 +6,1 @@\n-    return a + b\n+    return a * b\n"
+    fd = FileDiff(path="a.py", additions=1, deletions=1, patch=patch)
+    expanded = expand_file_diff(fd, full_source=src, max_lines=20)
+    # header start should now point to the expanded position (3), not 6
+    m = re.search(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@", expanded.patch)
+    assert m is not None, expanded.patch
+    old_start, old_count, new_start, new_count = (int(x) for x in m.groups())
+    assert old_start == 3
+    assert new_start == 3
+    # Body now has 3 prefix context lines + 1 deletion + 1 addition
+    # old: 3 context + 1 deletion = 4
+    # new: 3 context + 1 addition = 4
+    assert old_count == 4
+    assert new_count == 4
+
+
+def test_parse_hunks_strips_trailing_empty_line_from_body():
+    patch = "@@ -1,1 +1,1 @@\n-old\n+new\n"  # trailing newline -> empty last element
+    hunks = _parse_hunks(patch)
+    assert len(hunks) == 1
+    _, _, body = hunks[0]
+    # body should not end with an extra empty line
+    assert not body.endswith("\n")
+    assert body.split("\n")[-1] != ""
