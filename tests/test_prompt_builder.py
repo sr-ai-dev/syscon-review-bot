@@ -121,13 +121,22 @@ class TestBuildUserPrompt:
         assert "a.py" in prompt
         assert "+x" in prompt
 
-    def test_large_file_truncated(self):
-        large = "\n".join([f"+line {i}" for i in range(600)])
+    def test_dropped_paths_section_when_provided(self):
         prompt = build_user_prompt(
-            files=[FileDiff(path="big.py", patch=large, additions=600, deletions=0)],
+            files=self._files(),
+            pr_title="t", pr_body="b", base_branch="m", head_branch="f",
+            dropped_paths=["huge.py", "other_big.py"],
+        )
+        assert "토큰 예산" in prompt
+        assert "huge.py" in prompt
+        assert "other_big.py" in prompt
+
+    def test_no_dropped_paths_section_when_none(self):
+        prompt = build_user_prompt(
+            files=self._files(),
             pr_title="t", pr_body="b", base_branch="m", head_branch="f",
         )
-        assert "요약" in prompt or "truncated" in prompt.lower()
+        assert "토큰 예산" not in prompt
 
     def test_conversation_history_section_when_present(self):
         prompt = build_user_prompt(

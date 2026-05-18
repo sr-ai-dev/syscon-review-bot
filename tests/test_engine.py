@@ -375,6 +375,29 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
 
 
 @pytest.mark.asyncio
+async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligned_result):
+    huge = "a" * 250000
+    diff = (
+        "diff --git a/huge.py b/huge.py\n"
+        f"@@ -1,1 +1,1 @@\n+{huge}\n"
+        "diff --git a/small.py b/small.py\n"
+        "@@ -1,1 +1,1 @@\n+ok\n"
+    )
+    captured = {}
+    async def fake_review(system, user, model=None):
+        captured["user"] = user
+        return aligned_result
+    mock_github = _mock_github(diff=diff)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000)), _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+    assert "small.py" in captured["user"]
+    assert ("a" * 1000) not in captured["user"]
+    assert "토큰 예산" in captured["user"] or "huge.py" in captured["user"]
+
+
+@pytest.mark.asyncio
 async def test_expand_files_swallows_non_404_errors(context, aligned_result):
     """If get_repo_file raises (e.g., 500), engine still proceeds with original FileDiff."""
     diff = (

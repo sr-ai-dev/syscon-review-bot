@@ -19,6 +19,7 @@ from src.review.gpt_client import GPTClient
 from src.review.prompt_builder import build_system_prompt, build_user_prompt
 from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
 from src.review.hunk_expander import expand_file_diff
+from src.review.compressor import compress_files
 
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ async def review_pr(
     filtered = await _expand_files(
         github_client, context.repo, head_sha, filtered, config.max_expand_lines
     )
+    filtered, dropped_paths = compress_files(filtered, config.token_budget)
 
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
     bot_reviews = filter_bot_reviews(raw_reviews)
@@ -100,6 +102,7 @@ async def review_pr(
         base_branch=pr_info["base"]["ref"],
         head_branch=pr_info["head"]["ref"],
         conversation_history=conversation_history,
+        dropped_paths=dropped_paths,
     )
 
     if dry_run:

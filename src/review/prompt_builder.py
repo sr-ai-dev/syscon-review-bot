@@ -1,9 +1,6 @@
 from src.review.diff_parser import FileDiff
 
 
-MAX_FILE_LINES = 500
-
-
 SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의 명시된 목적(스펙·요구사항)과 실제 코드 변경의 정합성, (2) SonarQube 스타일 코드 품질(버그·취약점·보안·코드 스멜·복잡도). 단순 스타일 취향이나 테스트 커버리지 수치는 검토 대상이 아니다.
 
 ## 재리뷰 절차 (이전 봇 리뷰가 대화 히스토리에 존재하는 경우)
@@ -119,6 +116,7 @@ def build_user_prompt(
     base_branch: str,
     head_branch: str,
     conversation_history: list[str] | None = None,
+    dropped_paths: list[str] | None = None,
 ) -> str:
     parts = [
         "## PR 정보",
@@ -131,17 +129,15 @@ def build_user_prompt(
 
     for f in files:
         parts.append(f"### {f.path} (+{f.additions}, -{f.deletions})")
-        patch_lines = f.patch.split("\n")
-        if len(patch_lines) > MAX_FILE_LINES:
-            truncated = "\n".join(patch_lines[:MAX_FILE_LINES])
-            parts.append(f"```diff\n{truncated}\n```")
-            parts.append(
-                f"(파일이 {len(patch_lines)}줄로 커서 {MAX_FILE_LINES}줄까지만 포함. "
-                "나머지는 요약하여 검토하라.)"
-            )
-        else:
-            parts.append(f"```diff\n{f.patch}\n```")
+        parts.append(f"```diff\n{f.patch}\n```")
         parts.append("")
+
+    if dropped_paths:
+        parts.append("")
+        parts.append("## 토큰 예산 초과로 제외된 파일")
+        for p in dropped_paths:
+            parts.append(f"- {p}")
+        parts.append("(이 파일들은 변경이 컸지만 컨텍스트 한계로 본문에 포함되지 않았다. 가능한 범위에서 참고만 하라.)")
 
     if conversation_history:
         parts.append("")
