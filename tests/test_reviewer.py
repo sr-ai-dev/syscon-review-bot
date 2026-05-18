@@ -111,6 +111,20 @@ class TestFormatReviewBody:
         assert "Line2" in row
 
 
+def _result_with_prior_resolved():
+    return ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False,
+        summary="이전 3건 중 2건 해결, 1건 미해결 + 신규 1건",
+        prior_resolved=[
+            "필드 초기값 direction 기반 기본값과 불일치 → 생성자에서 direction 분기 추가하여 해결",
+            "getWaypointNode 방향 의존 → 작성자 설명 수용 (의도된 설계)",
+        ],
+        mismatches=[
+            Mismatch(file="src/a.py", line=10, description="미해결 이슈", suggestion="수정 필요"),
+        ],
+    )
+
+
 def _result_with_quality_findings():
     return ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=True,
@@ -156,6 +170,22 @@ class TestFormatReviewBodyQuality:
         )
         body = format_review_body(result)
         assert r"a \| b" in body
+
+
+class TestFormatReviewBodyPriorResolved:
+    def test_prior_resolved_section_rendered(self):
+        body = format_review_body(_result_with_prior_resolved())
+        assert "이전 리뷰 해결 현황" in body
+        assert "필드 초기값" in body
+        assert "getWaypointNode" in body
+
+    def test_prior_resolved_not_shown_when_empty(self):
+        body = format_review_body(_result_aligned())
+        assert "이전 리뷰 해결 현황" not in body
+
+    def test_prior_resolved_shows_count(self):
+        body = format_review_body(_result_with_prior_resolved())
+        assert "2건 해결" in body
 
 
 class TestFilterBotReviews:

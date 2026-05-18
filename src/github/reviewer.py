@@ -46,6 +46,14 @@ def format_review_body(result: ReviewResult) -> str:
     decision = compute_decision(result)
     lines = [BOT_REVIEW_MARKER, "", result.summary]
 
+    if result.prior_resolved:
+        lines.extend([
+            "",
+            f"### 이전 리뷰 해결 현황 ({len(result.prior_resolved)}건 해결)",
+        ])
+        for item in result.prior_resolved:
+            lines.append(f"- ~~{_escape_table_cell(item)}~~")
+
     if result.spec_status == SpecStatus.MISSING:
         lines.extend([
             "",
