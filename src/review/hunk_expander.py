@@ -1,6 +1,8 @@
+import re
 from dataclasses import dataclass
 
-from src.review.language_patterns import find_header_lines
+from src.review.diff_parser import FileDiff
+from src.review.language_patterns import detect_language, find_header_lines
 
 
 @dataclass
@@ -45,4 +47,76 @@ def expand_hunk_to_header(
     selected = lines[new_start - 1 : hunk_end_line]
     return ExpandedHunk(
         start_line=new_start, end_line=hunk_end_line, text="\n".join(selected)
+    )
+
+
+_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def _parse_hunks(patch: str) -> list[tuple[int, int, str]]:
+    """Parse unified diff patch into list of (new_start, new_lines, hunk_body) tuples."""
+    hunks: list[tuple[int, int, str]] = []
+    cur_start: int | None = None
+    cur_lines: int | None = None
+    cur_body: list[str] = []
+    for line in patch.split("\n"):
+        m = _HUNK_HEADER_RE.match(line)
+        if m:
+            if cur_start is not None:
+                hunks.append((cur_start, cur_lines or 0, "\n".join(cur_body)))
+            cur_start = int(m.group(1))
+            cur_lines = int(m.group(2) or "1")
+            cur_body = []
+        elif cur_start is not None:
+            cur_body.append(line)
+    if cur_start is not None:
+        hunks.append((cur_start, cur_lines or 0, "\n".join(cur_body)))
+    return hunks
+
+
+def expand_file_diff(fd: FileDiff, full_source: str, max_lines: int) -> FileDiff:
+    """Expand all hunks in a FileDiff to include enclosing function/class headers.
+
+    Each hunk body is prepended with context lines (prefixed with a space)
+    from the enclosing header up to the hunk start, preserving unified diff format.
+
+    Args:
+        fd: FileDiff with path and patch text
+        full_source: Complete file source as a string
+        max_lines: Maximum lines to search backward for a header
+
+    Returns:
+        New FileDiff with expanded patch text, or original fd if patch has no hunks.
+    """
+    hunks = _parse_hunks(fd.patch)
+    if not hunks:
+        return fd
+
+    language = detect_language(fd.path)
+    file_lines = full_source.split("\n")
+    new_parts: list[str] = []
+
+    for new_start, new_lines, body in hunks:
+        end_line = new_start + max(new_lines - 1, 0)
+        expanded = expand_hunk_to_header(
+            full_source=full_source,
+            hunk_start_line=new_start,
+            hunk_end_line=end_line,
+            language=language,
+            max_lines=max_lines,
+        )
+        # Lines between expanded start and hunk start (exclusive) become context lines
+        prefix_lines = file_lines[expanded.start_line - 1 : new_start - 1]
+        header = f"@@ -{new_start},{new_lines} +{new_start},{new_lines} @@"
+        new_parts.append(header)
+        if prefix_lines:
+            prefix = "\n".join(" " + line for line in prefix_lines)
+            new_parts.append(prefix)
+        new_parts.append(body)
+
+    return FileDiff(
+        path=fd.path,
+        patch="\n".join(new_parts),
+        additions=fd.additions,
+        deletions=fd.deletions,
     )
