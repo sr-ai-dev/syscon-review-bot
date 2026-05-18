@@ -372,3 +372,26 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
 
     assert "def main()" in captured["user"]
     assert "y = helper()" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_expand_files_swallows_non_404_errors(context, aligned_result):
+    """If get_repo_file raises (e.g., 500), engine still proceeds with original FileDiff."""
+    diff = (
+        "diff --git a/a.py b/a.py\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old\n+new\n"
+    )
+    mock_github = _mock_github(diff=diff)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    async def raise_500(*args, **kwargs):
+        raise RuntimeError("simulated 500")
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), \
+         patch("src.review.engine.get_repo_file", side_effect=raise_500):
+        await review_pr(context, mock_github, mock_gpt)
+
+    # GPT 호출이 발생했음을 확인 (= 엔진이 크래시하지 않음)
+    mock_gpt.review.assert_called_once()

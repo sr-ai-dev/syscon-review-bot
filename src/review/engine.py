@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -122,15 +123,25 @@ async def review_pr(
     )
 
 
-async def _expand_files(github_client, repo, head_sha, files, max_lines):
-    expanded: list = []
-    for f in files:
+async def _fetch_and_expand(github_client, repo, head_sha, f, max_lines):
+    """Fetch file content and expand hunks, with error tolerance."""
+    try:
         source = await get_repo_file(github_client, repo, f.path, head_sha)
-        if source is None:
-            expanded.append(f)
-            continue
-        expanded.append(expand_file_diff(f, full_source=source, max_lines=max_lines))
-    return expanded
+    except Exception as e:
+        logger.warning(f"Failed to fetch {f.path}@{head_sha} for hunk expansion: {e}")
+        return f
+    if source is None:
+        return f
+    return expand_file_diff(f, full_source=source, max_lines=max_lines)
+
+
+async def _expand_files(github_client, repo, head_sha, files, max_lines):
+    """Expand all files' hunks in parallel."""
+    tasks = [
+        _fetch_and_expand(github_client, repo, head_sha, f, max_lines)
+        for f in files
+    ]
+    return await asyncio.gather(*tasks)
 
 
 def _build_conversation_history(
