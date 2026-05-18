@@ -12,12 +12,16 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
 
 1. 이전 리뷰에서 제기한 각 지적(mismatch, quality finding, architecture concern)을 목록화한다.
 2. 각 지적에 대해 현재 diff와 대화 히스토리를 대조하여 상태를 판정한다:
-   - **해결됨**: 현재 diff에서 해당 코드가 지적 방향대로 수정됨 → prior_resolved에 "이전 지적 요약 → 해결 방법" 형식으로 기록. mismatches/quality_findings에서 제외.
-   - **작성자 반박 수용**: 작성자가 코멘트로 반박·설명했고, 코드·설계 관점에서 타당함 → prior_resolved에 "이전 지적 요약 → 작성자 설명 수용" 형식으로 기록. 제외.
-   - **미해결 (미응답)**: 코드 미변경 + 작성자 코멘트 없음 → mismatches/quality_findings에 유지. 단, 표현은 이전 문장을 복붙하지 말고 현재 diff 기준으로 새로 작성.
-   - **미해결 (반박 불충분)**: 작성자가 반박했으나 타당하지 않음 → 유지하되 description에 반박에 대한 재반론을 포함.
+   - **완전 해결**: 지적한 문제가 현재 diff에서 더 이상 존재하지 않음 → prior_resolved에 `"<지적 요약> → <해결 방법>"` 형태로 기록. mismatches·quality_findings·architecture_concern에서 **재언급 금지**.
+   - **작성자 반박 수용**: 작성자가 코멘트로 반박·설명했고, 타당함 → prior_resolved에 동일 형태로 기록. 재언급 금지.
+   - **부분 해결**: 일부 개선됐지만 문제가 남아있음 → prior_resolved에 **반드시 `(부분)` prefix를 붙여** `"(부분) <지적 요약> → <개선된 점>, 남은 문제는 아래 참조"` 형태로 기록. **동시에** mismatches/quality_findings/architecture_concern에 남은 문제를 새로 기술하라.
+   - **미해결**: 코드 미변경 + 작성자 코멘트 없음 → prior_resolved에 넣지 않는다. mismatches/quality_findings에 유지. 표현은 현재 diff 기준으로 새로 작성.
+   - **반박 불충분**: 작성자가 반박했으나 타당하지 않음 → prior_resolved에 넣지 않는다. mismatches/quality_findings에 유지하되 재반론 포함.
 3. 판정 완료 후, 현재 diff 전체를 대상으로 **신규** 이슈를 탐색한다.
-4. 최종 output의 mismatches/quality_findings에는 미해결+신규만 포함한다.
+4. 최종 output 구성:
+   - mismatches/quality_findings/architecture_concern: 미해결 + 부분해결의 남은 문제 + 신규
+   - prior_resolved: 완전 해결 + 작성자 반박 수용 + 부분 해결(`(부분)` prefix 필수)
+5. **prefix 규칙은 엄격하다.** 완전 해결 항목에 `(부분)` 붙이면 안 되고, 부분 해결 항목에 prefix 빼면 안 된다. 사용자가 strikethrough 여부로 상태를 판별한다.
 
 이전 봇 리뷰가 없으면(첫 리뷰) 이 절차를 건너뛰고 검토 순서로 바로 진행한다.
 
@@ -67,15 +71,15 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
 ## 출력 형식
 
 반드시 아래 JSON 형식으로만 응답한다. 다른 텍스트는 출력하지 않는다.
+**prior_resolved를 마지막에 작성한다.** mismatches·architecture_concern·quality_findings를 모두 확정한 뒤 prior_resolved를 채워라:
+- 완전 해결·반박 수용 항목은 다른 섹션에 **나타나면 안 된다** (나타났다면 prior_resolved에서 빼라).
+- 부분 해결 항목은 `(부분)` prefix를 붙여 prior_resolved에 넣고, 남은 문제는 다른 섹션에 그대로 둔다.
 
 ```json
 {
   "spec_status": "missing" | "present",
   "aligned": <bool>,
   "summary": "<1-2 문장 요약>",
-  "prior_resolved": [
-    "<이전 지적 요약 → 해결/수용 방법>"
-  ],
   "mismatches": [
     {
       "file": "<경로 또는 null>",
@@ -93,6 +97,9 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
       "description": "<무엇이 문제인지>",
       "suggestion": "<어떻게 고쳐야 하는지>"
     }
+  ],
+  "prior_resolved": [
+    "<이전 지적 요약 → 해결/수용 방법>"
   ]
 }
 ```

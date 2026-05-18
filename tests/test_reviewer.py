@@ -175,17 +175,48 @@ class TestFormatReviewBodyQuality:
 class TestFormatReviewBodyPriorResolved:
     def test_prior_resolved_section_rendered(self):
         body = format_review_body(_result_with_prior_resolved())
-        assert "이전 리뷰 해결 현황" in body
+        assert "이전 리뷰 상태" in body
         assert "필드 초기값" in body
         assert "getWaypointNode" in body
 
     def test_prior_resolved_not_shown_when_empty(self):
         body = format_review_body(_result_aligned())
-        assert "이전 리뷰 해결 현황" not in body
+        assert "이전 리뷰 상태" not in body
 
-    def test_prior_resolved_shows_count(self):
+    def test_full_resolved_item_uses_strikethrough(self):
         body = format_review_body(_result_with_prior_resolved())
-        assert "2건 해결" in body
+        # 완전 해결 항목은 strikethrough (~~)
+        line = next(l for l in body.split("\n") if "필드 초기값" in l)
+        assert "~~" in line
+
+    def test_partial_resolved_item_no_strikethrough(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+            prior_resolved=["(부분) 그룹 패널 책임 집중 → 일부 helper 분리됨"],
+            mismatches=[
+                Mismatch(file="x.py", line=1, description="남은 문제", suggestion="s"),
+            ],
+        )
+        body = format_review_body(result)
+        line = next(l for l in body.split("\n") if "그룹 패널" in l)
+        assert "~~" not in line
+        # 부분 표식이 사용자에게 보여야 함
+        assert "부분" in line
+
+    def test_count_distinguishes_full_and_partial(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+            prior_resolved=[
+                "완전 해결 A → 해결됨",
+                "(부분) 부분 해결 B → 일부만",
+                "완전 해결 C → 해결됨",
+            ],
+            mismatches=[Mismatch(file="x.py", line=1, description="남은 문제", suggestion="s")],
+        )
+        body = format_review_body(result)
+        # 완전 2건 + 부분 1건이 헤더에 노출되어야 함
+        assert "완전 해결 2건" in body or "2건 해결" in body
+        assert "부분 해결 1건" in body or "1건 부분" in body
 
 
 class TestFilterBotReviews:

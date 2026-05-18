@@ -332,5 +332,5 @@ async def test_review_pr_renders_prior_resolved_in_body(context):
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "이전 리뷰 해결 현황" in payload["body"]
+    assert "이전 리뷰 상태" in payload["body"]
     assert "이전 지적 A" in payload["body"]

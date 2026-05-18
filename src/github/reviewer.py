@@ -47,12 +47,23 @@ def format_review_body(result: ReviewResult) -> str:
     lines = [BOT_REVIEW_MARKER, "", result.summary]
 
     if result.prior_resolved:
+        partials = [i for i in result.prior_resolved if i.lstrip().startswith("(부분)")]
+        fulls = [i for i in result.prior_resolved if i not in partials]
+        header_parts = []
+        if fulls:
+            header_parts.append(f"완전 해결 {len(fulls)}건")
+        if partials:
+            header_parts.append(f"부분 해결 {len(partials)}건")
         lines.extend([
             "",
-            f"### 이전 리뷰 해결 현황 ({len(result.prior_resolved)}건 해결)",
+            f"### 이전 리뷰 상태 ({', '.join(header_parts)})",
         ])
-        for item in result.prior_resolved:
+        for item in fulls:
             lines.append(f"- ~~{_escape_table_cell(item)}~~")
+        for item in partials:
+            stripped = item.lstrip()
+            stripped = stripped[len("(부분)"):].lstrip()
+            lines.append(f"- 🔶 부분 해결: {_escape_table_cell(stripped)}")
 
     if result.spec_status == SpecStatus.MISSING:
         lines.extend([
