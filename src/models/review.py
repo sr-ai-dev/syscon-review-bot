@@ -50,3 +50,4 @@ class ReviewResult(BaseModel):
     mismatches: list[Mismatch] = Field(default_factory=list)
     architecture_concern: str = ""
     quality_findings: list[QualityFinding] = Field(default_factory=list)
+    prior_resolved: list[str] = Field(default_factory=list)

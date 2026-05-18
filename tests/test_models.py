@@ -148,6 +148,25 @@ class TestReviewResultQualityFindings:
         assert result.quality_findings[0].category == FindingCategory.VULNERABILITY
 
 
+class TestPriorResolved:
+    def test_prior_resolved_default_empty(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+        )
+        assert result.prior_resolved == []
+
+    def test_prior_resolved_accepted(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+            prior_resolved=[
+                "필드 초기값 direction 기반 기본값과 불일치 → 생성자에서 direction 분기 추가하여 해결",
+                "getWaypointNode 방향 의존 → 방향 파라미터 제거하여 해결",
+            ],
+        )
+        assert len(result.prior_resolved) == 2
+        assert "해결" in result.prior_resolved[0]
+
+
 class TestDecisionEnum:
     def test_three_values(self):
         # GitHub event 이름과 매칭. APPROVE는 정책상 못 보내지만 결정 라벨로는 유지.
