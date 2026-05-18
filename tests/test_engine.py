@@ -181,7 +181,7 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
 
     user_prompt = captured["user"]
     # 통합 섹션 헤더
-    assert "PR 대화 히스토리" in user_prompt
+    assert "이전 리뷰 & 대화 히스토리" in user_prompt
     # 봇 본문 전체 포함
     assert "FIRST_BOT_BODY" in user_prompt
     assert "SECOND_BOT_BODY" in user_prompt
@@ -313,3 +313,24 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     # No "after last bot review" filter — all comments included
     assert "오래된 토론" in user_prompt
     assert "late bot review" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_review_pr_renders_prior_resolved_in_body(context):
+    result_with_resolved = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True, summary="해결 완료",
+        prior_resolved=["이전 지적 A → 해결됨"],
+    )
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = result_with_resolved
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(),
+    ):
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "이전 리뷰 해결 현황" in payload["body"]
+    assert "이전 지적 A" in payload["body"]
