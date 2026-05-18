@@ -17,6 +17,7 @@ from src.review.diff_parser import filter_files, parse_diff
 from src.review.gpt_client import GPTClient
 from src.review.prompt_builder import build_system_prompt, build_user_prompt
 from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
+from src.review.hunk_expander import expand_file_diff
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,11 @@ async def review_pr(
         logger.info("All files filtered out")
         return
 
+    head_sha = pr_info["head"]["sha"]
+    filtered = await _expand_files(
+        github_client, context.repo, head_sha, filtered, config.max_expand_lines
+    )
+
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
     bot_reviews = filter_bot_reviews(raw_reviews)
     bot_logins: set[str] = {
@@ -114,6 +120,17 @@ async def review_pr(
         f"spec_status={result.spec_status.value}, aligned={result.aligned}, "
         f"decision={decision.value}"
     )
+
+
+async def _expand_files(github_client, repo, head_sha, files, max_lines):
+    expanded: list = []
+    for f in files:
+        source = await get_repo_file(github_client, repo, f.path, head_sha)
+        if source is None:
+            expanded.append(f)
+            continue
+        expanded.append(expand_file_diff(f, full_source=source, max_lines=max_lines))
+    return expanded
 
 
 def _build_conversation_history(

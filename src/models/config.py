@@ -13,3 +13,4 @@ class ReviewConfig(BaseModel):
 
     model: str | None = None
     ignore: IgnoreConfig = Field(default_factory=IgnoreConfig)
+    max_expand_lines: int = 50  # backward search cap for hunk expansion
