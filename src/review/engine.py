@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -17,6 +18,11 @@ from src.review.diff_parser import filter_files, parse_diff
 from src.review.gpt_client import GPTClient
 from src.review.prompt_builder import build_system_prompt, build_user_prompt
 from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
+from src.review.hunk_expander import expand_file_diff
+from src.review.compressor import compress_files
+from src.review.judge import run_judge
+from src.review.postprocess import postprocess
+from src.review.tool_executor import GitHubToolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +40,11 @@ async def load_repo_config(
     ref: str,
     config_path: str = ".github/review-bot.yml",
 ) -> ReviewConfig:
-    content = await get_repo_file(github_client, repo, config_path, ref)
+    try:
+        content = await get_repo_file(github_client, repo, config_path, ref)
+    except Exception as e:
+        logger.warning(f"Config fetch failed at {config_path} in {repo}: {e} — using defaults")
+        return DEFAULT_CONFIG
     if content is None:
         logger.info(f"No config file at {config_path} in {repo}, using defaults")
         return DEFAULT_CONFIG
@@ -67,6 +77,12 @@ async def review_pr(
         logger.info("All files filtered out")
         return
 
+    head_sha = pr_info["head"]["sha"]
+    filtered = await _expand_files(
+        github_client, context.repo, head_sha, filtered, config.max_expand_lines
+    )
+    filtered, dropped_paths = compress_files(filtered, config.token_budget)
+
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
     bot_reviews = filter_bot_reviews(raw_reviews)
     bot_logins: set[str] = {
@@ -93,6 +109,7 @@ async def review_pr(
         base_branch=pr_info["base"]["ref"],
         head_branch=pr_info["head"]["ref"],
         conversation_history=conversation_history,
+        dropped_paths=dropped_paths,
     )
 
     if dry_run:
@@ -105,7 +122,21 @@ async def review_pr(
         return
 
     chosen_model = model_override or config.model
-    result = await gpt_client.review(system_prompt, user_prompt, model=chosen_model)
+
+    executor = None
+    if config.enable_tool_use:
+        executor = GitHubToolExecutor(github_client, context.repo, head_sha)
+
+    result = await gpt_client.review(
+        system_prompt,
+        user_prompt,
+        model=chosen_model,
+        tool_executor=executor,
+        max_tool_iterations=config.max_tool_iterations,
+    )
+    result = postprocess(result, threshold=config.confidence_threshold)
+    if config.enable_judge:
+        result = await run_judge(gpt_client, result, model=chosen_model)
 
     decision = compute_decision(result)
     await submit_review(github_client, context.repo, context.pr_number, result)
@@ -114,6 +145,27 @@ async def review_pr(
         f"spec_status={result.spec_status.value}, aligned={result.aligned}, "
         f"decision={decision.value}"
     )
+
+
+async def _fetch_and_expand(github_client, repo, head_sha, f, max_lines):
+    """Fetch file content and expand hunks, with error tolerance."""
+    try:
+        source = await get_repo_file(github_client, repo, f.path, head_sha)
+    except Exception as e:
+        logger.warning(f"Failed to fetch {f.path}@{head_sha} for hunk expansion: {e}")
+        return f
+    if source is None:
+        return f
+    return expand_file_diff(f, full_source=source, max_lines=max_lines)
+
+
+async def _expand_files(github_client, repo, head_sha, files, max_lines):
+    """Expand all files' hunks in parallel."""
+    tasks = [
+        _fetch_and_expand(github_client, repo, head_sha, f, max_lines)
+        for f in files
+    ]
+    return await asyncio.gather(*tasks)
 
 
 def _build_conversation_history(

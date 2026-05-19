@@ -34,7 +34,7 @@ def make_get_json_dispatch(
 ):
     pr_info = pr_info or {
         "title": "T", "body": "B",
-        "head": {"ref": "feat"}, "base": {"ref": "main"},
+        "head": {"ref": "feat", "sha": "deadbeef"}, "base": {"ref": "main"},
     }
     reviews = reviews or []
     issue_comments = issue_comments or []
@@ -60,6 +60,9 @@ def _mock_github(diff="diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x", **dispatch_kw
     return m
 
 
+_NO_EXPAND = patch("src.review.engine.get_repo_file", new_callable=AsyncMock, return_value=None)
+
+
 @pytest.mark.asyncio
 async def test_review_pr_submits_when_present(context, aligned_result):
     mock_github = _mock_github()
@@ -68,8 +71,8 @@ async def test_review_pr_submits_when_present(context, aligned_result):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
-    ):
+        new_callable=AsyncMock, return_value=ReviewConfig(enable_judge=False),
+    ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     mock_gpt.review.assert_called_once()
@@ -91,7 +94,7 @@ async def test_review_pr_request_changes_on_mismatches(context):
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(),
-    ):
+    ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
@@ -107,7 +110,7 @@ async def test_review_pr_request_changes_on_missing_spec(context, missing_spec_r
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(),
-    ):
+    ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
@@ -123,7 +126,7 @@ async def test_review_pr_skips_empty_diff(context):
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(),
-    ):
+    ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     mock_gpt.review.assert_not_called()
@@ -164,7 +167,7 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
         captured["user"] = user
         return aligned_result
 
@@ -176,12 +179,12 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
     # 통합 섹션 헤더
-    assert "PR 대화 히스토리" in user_prompt
+    assert "이전 리뷰 & 대화 히스토리" in user_prompt
     # 봇 본문 전체 포함
     assert "FIRST_BOT_BODY" in user_prompt
     assert "SECOND_BOT_BODY" in user_prompt
@@ -218,7 +221,7 @@ async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_re
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
         captured["user"] = user
         return aligned_result
 
@@ -230,7 +233,7 @@ async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_re
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     assert "BOT_SELF_ISSUE_COMMENT" not in captured["user"]
@@ -246,7 +249,7 @@ async def test_review_pr_uses_config_model(context, aligned_result):
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=cfg,
-    ):
+    ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     assert mock_gpt.review.call_args.kwargs["model"] == "gpt-5-mini"
@@ -260,7 +263,7 @@ async def test_review_pr_dry_run_skips_gpt_and_submit(context, capsys):
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(),
-    ):
+    ), _NO_EXPAND:
         await review_pr(
             context=context, github_client=mock_github, gpt_client=mock_gpt,
             dry_run=True,
@@ -294,7 +297,7 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
         captured["user"] = user
         return aligned_result
 
@@ -306,10 +309,236 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()):
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
     # No "after last bot review" filter — all comments included
     assert "오래된 토론" in user_prompt
     assert "late bot review" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_review_pr_renders_prior_resolved_in_body(context):
+    result_with_resolved = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True, summary="해결 완료",
+        prior_resolved=["이전 지적 A → 해결됨"],
+    )
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = result_with_resolved
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "이전 리뷰 상태" in payload["body"]
+    assert "이전 지적 A" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_result):
+    """엔진이 변경 파일을 head SHA로 fetch해서 hunk 확장 후 LLM에 전달."""
+    full_source = "\n".join([
+        "x = 1",
+        "def helper():",
+        "    return 1",
+        "def main():",
+        "    y = helper()",
+        "    return y + 1",
+    ])
+    diff = (
+        "diff --git a/a.py b/a.py\n"
+        "@@ -6,1 +6,1 @@\n"
+        "-    return y\n"
+        "+    return y + 1\n"
+    )
+
+    captured = {}
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+        captured["user"] = user
+        return aligned_result
+
+    mock_github = _mock_github(diff=diff)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+         patch("src.review.engine.get_repo_file", new_callable=AsyncMock, return_value=full_source):
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert "def main()" in captured["user"]
+    assert "y = helper()" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligned_result):
+    huge = "a" * 250000
+    diff = (
+        "diff --git a/huge.py b/huge.py\n"
+        f"@@ -1,1 +1,1 @@\n+{huge}\n"
+        "diff --git a/small.py b/small.py\n"
+        "@@ -1,1 +1,1 @@\n+ok\n"
+    )
+    captured = {}
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+        captured["user"] = user
+        return aligned_result
+    mock_github = _mock_github(diff=diff)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000, enable_judge=False)), _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+    assert "small.py" in captured["user"]
+    assert ("a" * 1000) not in captured["user"]
+    assert "토큰 예산" in captured["user"] or "huge.py" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_review_pr_runs_judge_when_enabled(context):
+    first = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="원본",
+        prior_resolved=["X → 일부"], architecture_concern="X 잔존",
+    )
+    judged = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="judged",
+        prior_resolved=["(부분) X → 일부, 잔존은 아키텍처 참조"],
+        architecture_concern="X 잔존",
+    )
+    call_count = {"n": 0}
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+        call_count["n"] += 1
+        return first if call_count["n"] == 1 else judged
+
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=True)), \
+         _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert call_count["n"] == 2
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "(부분)" in body or "🔶" in body
+
+
+@pytest.mark.asyncio
+async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
+    call_count = {"n": 0}
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+        call_count["n"] += 1
+        return aligned_result
+
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+         _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert call_count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_review_pr_creates_tool_executor_when_enabled(context, aligned_result):
+    captured = {}
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+        captured["tool_executor"] = tool_executor
+        captured["max_tool_iterations"] = max_tool_iterations
+        return aligned_result
+
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=True, max_tool_iterations=5)), \
+         _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert captured["tool_executor"] is not None
+    assert hasattr(captured["tool_executor"], "read_file")
+    assert hasattr(captured["tool_executor"], "grep")
+    assert captured["max_tool_iterations"] == 5
+
+
+@pytest.mark.asyncio
+async def test_review_pr_omits_tool_executor_when_disabled(context, aligned_result):
+    captured = {}
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+        captured["tool_executor"] = tool_executor
+        return aligned_result
+
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=False)), \
+         _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert captured["tool_executor"] is None
+
+
+@pytest.mark.asyncio
+async def test_load_repo_config_falls_back_to_default_on_non_404_error():
+    from src.review.engine import load_repo_config
+    from src.review.config_loader import DEFAULT_CONFIG
+    mock_gh = AsyncMock()
+    # 5xx 시뮬레이션
+    mock_gh.get_json = AsyncMock(side_effect=RuntimeError("simulated 500"))
+    cfg = await load_repo_config(mock_gh, "owner/repo", "deadbeef")
+    assert cfg is DEFAULT_CONFIG
+
+
+@pytest.mark.asyncio
+async def test_review_pr_applies_postprocess_filter(context):
+    """엔진이 LLM 응답에 postprocess를 적용해 저신뢰 finding을 제거."""
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="혼합",
+        mismatches=[
+            Mismatch(file="a.py", line=1, description="확실 finding", suggestion="s", confidence=85),
+            Mismatch(file="b.py", line=2, description="약함 finding", suggestion="s", confidence=40),
+        ],
+    )
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_judge=False, enable_tool_use=False, confidence_threshold=70),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "확실 finding" in body
+    assert "약함 finding" not in body
+
+
+@pytest.mark.asyncio
+async def test_expand_files_swallows_non_404_errors(context, aligned_result):
+    """If get_repo_file raises (e.g., 500), engine still proceeds with original FileDiff."""
+    diff = (
+        "diff --git a/a.py b/a.py\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old\n+new\n"
+    )
+    mock_github = _mock_github(diff=diff)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    async def raise_500(*args, **kwargs):
+        raise RuntimeError("simulated 500")
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+         patch("src.review.engine.get_repo_file", side_effect=raise_500):
+        await review_pr(context, mock_github, mock_gpt)
+
+    # GPT 호출이 발생했음을 확인 (= 엔진이 크래시하지 않음)
+    mock_gpt.review.assert_called_once()

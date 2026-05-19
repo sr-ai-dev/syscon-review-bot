@@ -148,6 +148,47 @@ class TestReviewResultQualityFindings:
         assert result.quality_findings[0].category == FindingCategory.VULNERABILITY
 
 
+class TestPriorResolved:
+    def test_prior_resolved_default_empty(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+        )
+        assert result.prior_resolved == []
+
+    def test_prior_resolved_accepted(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+            prior_resolved=[
+                "필드 초기값 direction 기반 기본값과 불일치 → 생성자에서 direction 분기 추가하여 해결",
+                "getWaypointNode 방향 의존 → 방향 파라미터 제거하여 해결",
+            ],
+        )
+        assert len(result.prior_resolved) == 2
+        assert "해결" in result.prior_resolved[0]
+
+
+def test_mismatch_requires_confidence_field():
+    m = Mismatch(file="a.py", line=1, description="d", suggestion="s", confidence=85)
+    assert m.confidence == 85
+
+def test_mismatch_confidence_must_be_in_range():
+    with pytest.raises(ValidationError):
+        Mismatch(file="a.py", line=1, description="d", suggestion="s", confidence=150)
+    with pytest.raises(ValidationError):
+        Mismatch(file="a.py", line=1, description="d", suggestion="s", confidence=-5)
+
+def test_quality_finding_confidence_field():
+    q = QualityFinding(
+        category=FindingCategory.BUG, file="a.py", line=1,
+        description="d", suggestion="s", confidence=75,
+    )
+    assert q.confidence == 75
+
+def test_mismatch_confidence_defaults_to_70():
+    m = Mismatch(file="a.py", line=1, description="d", suggestion="s")
+    assert m.confidence == 70
+
+
 class TestDecisionEnum:
     def test_three_values(self):
         # GitHub event 이름과 매칭. APPROVE는 정책상 못 보내지만 결정 라벨로는 유지.

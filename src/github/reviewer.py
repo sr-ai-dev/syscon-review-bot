@@ -46,6 +46,25 @@ def format_review_body(result: ReviewResult) -> str:
     decision = compute_decision(result)
     lines = [BOT_REVIEW_MARKER, "", result.summary]
 
+    if result.prior_resolved:
+        partials = [i for i in result.prior_resolved if i.lstrip().startswith("(부분)")]
+        fulls = [i for i in result.prior_resolved if i not in partials]
+        header_parts = []
+        if fulls:
+            header_parts.append(f"완전 해결 {len(fulls)}건")
+        if partials:
+            header_parts.append(f"부분 해결 {len(partials)}건")
+        lines.extend([
+            "",
+            f"### 이전 리뷰 상태 ({', '.join(header_parts)})",
+        ])
+        for item in fulls:
+            lines.append(f"- ~~{_escape_table_cell(item)}~~")
+        for item in partials:
+            stripped = item.lstrip()
+            stripped = stripped[len("(부분)"):].lstrip()
+            lines.append(f"- 🔶 부분 해결: {_escape_table_cell(stripped)}")
+
     if result.spec_status == SpecStatus.MISSING:
         lines.extend([
             "",
@@ -56,14 +75,14 @@ def format_review_body(result: ReviewResult) -> str:
         lines.extend([
             "",
             "### 스펙과 불일치",
-            "| # | 항목 | 위치 | 제안 |",
-            "|---|------|------|------|",
+            "| # | 항목 | 위치 | conf | 제안 |",
+            "|---|------|------|------|------|",
         ])
         for idx, m in enumerate(result.mismatches, 1):
             desc = _escape_table_cell(m.description)
             sugg = _escape_table_cell(m.suggestion)
             loc = _format_location(m)
-            lines.append(f"| {idx} | {desc} | {loc} | {sugg} |")
+            lines.append(f"| {idx} | {desc} | {loc} | conf {m.confidence} | {sugg} |")
 
     lines.append("")
     lines.append("### 아키텍처 검토")
@@ -75,14 +94,14 @@ def format_review_body(result: ReviewResult) -> str:
     lines.append("")
     lines.append("### 코드 품질 검사")
     if result.quality_findings:
-        lines.append("| # | 분류 | 항목 | 위치 | 제안 |")
-        lines.append("|---|------|------|------|------|")
+        lines.append("| # | 분류 | 항목 | 위치 | conf | 제안 |")
+        lines.append("|---|------|------|------|------|------|")
         for idx, f in enumerate(result.quality_findings, 1):
             cat = _CATEGORY_LABEL[f.category]
             desc = _escape_table_cell(f.description)
             sugg = _escape_table_cell(f.suggestion)
             loc = _format_location(f)
-            lines.append(f"| {idx} | {cat} | {desc} | {loc} | {sugg} |")
+            lines.append(f"| {idx} | {cat} | {desc} | {loc} | conf {f.confidence} | {sugg} |")
     else:
         lines.append("> 이상 없음")
 

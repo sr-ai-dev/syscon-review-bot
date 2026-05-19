@@ -79,6 +79,30 @@ class TestBuildSystemPrompt:
         assert ("매크로" in prompt or "자동 구독" in prompt or "자동 inject" in prompt or "re-export" in prompt or "타입 전용" in prompt)
         assert "false positive" in prompt or "신뢰" in prompt
 
+    def test_includes_re_review_procedure(self):
+        prompt = build_system_prompt()
+        assert "재리뷰" in prompt
+        assert "prior_resolved" in prompt
+
+    def test_re_review_checks_resolution_before_new_issues(self):
+        prompt = build_system_prompt()
+        re_review_pos = prompt.index("재리뷰")
+        review_order_pos = prompt.index("검토 순서")
+        assert re_review_pos < review_order_pos
+
+    def test_re_review_includes_resolution_criteria(self):
+        prompt = build_system_prompt()
+        assert "해결" in prompt
+        assert "반박" in prompt or "반론" in prompt
+        assert "미해결" in prompt
+
+    def test_system_prompt_mentions_tool_usage_guidance(self):
+        from src.review.prompt_builder import build_system_prompt
+        s = build_system_prompt()
+        assert "read_file" in s
+        assert "grep" in s
+        assert "정의" in s or "본문" in s
+
     def test_includes_strict_mismatch_bar(self):
         prompt = build_system_prompt()
         assert "명확한 위반" in prompt
@@ -110,13 +134,22 @@ class TestBuildUserPrompt:
         assert "a.py" in prompt
         assert "+x" in prompt
 
-    def test_large_file_truncated(self):
-        large = "\n".join([f"+line {i}" for i in range(600)])
+    def test_dropped_paths_section_when_provided(self):
         prompt = build_user_prompt(
-            files=[FileDiff(path="big.py", patch=large, additions=600, deletions=0)],
+            files=self._files(),
+            pr_title="t", pr_body="b", base_branch="m", head_branch="f",
+            dropped_paths=["huge.py", "other_big.py"],
+        )
+        assert "토큰 예산" in prompt
+        assert "huge.py" in prompt
+        assert "other_big.py" in prompt
+
+    def test_no_dropped_paths_section_when_none(self):
+        prompt = build_user_prompt(
+            files=self._files(),
             pr_title="t", pr_body="b", base_branch="m", head_branch="f",
         )
-        assert "요약" in prompt or "truncated" in prompt.lower()
+        assert "토큰 예산" not in prompt
 
     def test_conversation_history_section_when_present(self):
         prompt = build_user_prompt(
@@ -128,7 +161,7 @@ class TestBuildUserPrompt:
                 "[2026-05-13T06:55:00Z | @alice (src/x.py:10)]\n이건 의도된 동작입니다",
             ],
         )
-        assert "PR 대화 히스토리" in prompt
+        assert "이전 리뷰 & 대화 히스토리" in prompt
         assert "이전 본문 내용" in prompt
         assert "이건 의도된 동작입니다" in prompt
         assert "src/x.py:10" in prompt
@@ -140,14 +173,23 @@ class TestBuildUserPrompt:
             base_branch="main", head_branch="f",
             conversation_history=["[2026-05-13T06:50:47Z | 커밋 abc | 🤖 봇]\n과거 발언"],
         )
-        # diff가 진리, 히스토리는 맥락
+        # diff가 진리
         assert "진리" in prompt
         # 복붙 금지
         assert "복붙하지" in prompt or "글자 단위" in prompt
-        # 타당하면 무시
-        assert "타당" in prompt
-        # 미해결 침묵 금지
-        assert "침묵" in prompt or "미해결" in prompt
+        # 재리뷰 절차 참조
+        assert "재리뷰" in prompt
+
+    def test_conversation_history_framing_re_review(self):
+        """히스토리가 있으면 재리뷰 절차 참조 안내가 포함됨."""
+        prompt = build_user_prompt(
+            files=self._files(),
+            pr_title="t", pr_body="b",
+            base_branch="main", head_branch="f",
+            conversation_history=["[2026-05-13T06:50:47Z | 커밋 abc | 🤖 봇]\n과거 발언"],
+        )
+        assert "재리뷰" in prompt
+        assert "판정" in prompt or "해결" in prompt
 
     def test_no_conversation_section_when_empty(self):
         prompt = build_user_prompt(
@@ -156,3 +198,11 @@ class TestBuildUserPrompt:
             base_branch="main", head_branch="f",
         )
         assert "PR 대화 히스토리" not in prompt
+
+
+class TestSystemPromptConfidence:
+    def test_system_prompt_requires_confidence_in_json_schema(self):
+        from src.review.prompt_builder import build_system_prompt
+        s = build_system_prompt()
+        schema_section = s[s.index("출력 형식"):]
+        assert schema_section.count("confidence") >= 2  # mismatches + quality_findings

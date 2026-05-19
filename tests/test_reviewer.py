@@ -111,6 +111,20 @@ class TestFormatReviewBody:
         assert "Line2" in row
 
 
+def _result_with_prior_resolved():
+    return ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False,
+        summary="이전 3건 중 2건 해결, 1건 미해결 + 신규 1건",
+        prior_resolved=[
+            "필드 초기값 direction 기반 기본값과 불일치 → 생성자에서 direction 분기 추가하여 해결",
+            "getWaypointNode 방향 의존 → 작성자 설명 수용 (의도된 설계)",
+        ],
+        mismatches=[
+            Mismatch(file="src/a.py", line=10, description="미해결 이슈", suggestion="수정 필요"),
+        ],
+    )
+
+
 def _result_with_quality_findings():
     return ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=True,
@@ -158,6 +172,53 @@ class TestFormatReviewBodyQuality:
         assert r"a \| b" in body
 
 
+class TestFormatReviewBodyPriorResolved:
+    def test_prior_resolved_section_rendered(self):
+        body = format_review_body(_result_with_prior_resolved())
+        assert "이전 리뷰 상태" in body
+        assert "필드 초기값" in body
+        assert "getWaypointNode" in body
+
+    def test_prior_resolved_not_shown_when_empty(self):
+        body = format_review_body(_result_aligned())
+        assert "이전 리뷰 상태" not in body
+
+    def test_full_resolved_item_uses_strikethrough(self):
+        body = format_review_body(_result_with_prior_resolved())
+        # 완전 해결 항목은 strikethrough (~~)
+        line = next(l for l in body.split("\n") if "필드 초기값" in l)
+        assert "~~" in line
+
+    def test_partial_resolved_item_no_strikethrough(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+            prior_resolved=["(부분) 그룹 패널 책임 집중 → 일부 helper 분리됨"],
+            mismatches=[
+                Mismatch(file="x.py", line=1, description="남은 문제", suggestion="s"),
+            ],
+        )
+        body = format_review_body(result)
+        line = next(l for l in body.split("\n") if "그룹 패널" in l)
+        assert "~~" not in line
+        # 부분 표식이 사용자에게 보여야 함
+        assert "부분" in line
+
+    def test_count_distinguishes_full_and_partial(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+            prior_resolved=[
+                "완전 해결 A → 해결됨",
+                "(부분) 부분 해결 B → 일부만",
+                "완전 해결 C → 해결됨",
+            ],
+            mismatches=[Mismatch(file="x.py", line=1, description="남은 문제", suggestion="s")],
+        )
+        body = format_review_body(result)
+        # 완전 2건 + 부분 1건이 헤더에 노출되어야 함
+        assert "완전 해결 2건" in body or "2건 해결" in body
+        assert "부분 해결 1건" in body or "1건 부분" in body
+
+
 class TestFilterBotReviews:
     def test_keeps_only_marker(self):
         raw = [
@@ -170,6 +231,31 @@ class TestFilterBotReviews:
     def test_filter_matches_real_body(self):
         body = format_review_body(_result_aligned())
         assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
+
+
+def test_mismatch_renders_with_confidence_tag():
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+        mismatches=[
+            Mismatch(file="a.py", line=10, description="d", suggestion="s", confidence=85),
+        ],
+    )
+    body = format_review_body(result)
+    assert "conf 85" in body
+
+
+def test_quality_finding_renders_with_confidence_tag():
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True, summary="s",
+        quality_findings=[
+            QualityFinding(
+                category=FindingCategory.BUG, file="x.py", line=1,
+                description="d", suggestion="s", confidence=72,
+            ),
+        ],
+    )
+    body = format_review_body(result)
+    assert "conf 72" in body
 
 
 class TestSubmitReview:
