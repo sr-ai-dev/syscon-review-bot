@@ -91,3 +91,46 @@ def test_arch_concern_string_preserved():
     r = _result(architecture_concern="단순 framework wiring")
     out = postprocess(r, threshold=70)
     assert out.architecture_concern == "단순 framework wiring"
+
+
+def test_prior_resolved_gets_partial_prefix_when_topic_still_in_findings():
+    r = _result(
+        prior_resolved=["그룹 패널 책임 → helper 분리로 일부 완화"],
+        architecture_concern="그룹 패널이 멤버 수집·집계·Command 실행 직접 담당",
+    )
+    out = postprocess(r, threshold=70)
+    assert out.prior_resolved[0].startswith("(부분)")
+
+
+def test_prior_resolved_keeps_full_when_topic_not_in_findings():
+    r = _result(
+        prior_resolved=["필드 초기값 → 생성자에서 보정"],
+        architecture_concern="다른 주제",
+    )
+    out = postprocess(r, threshold=70)
+    assert not out.prior_resolved[0].startswith("(부분)")
+
+
+def test_prior_resolved_partial_prefix_already_present_kept():
+    r = _result(
+        prior_resolved=["(부분) 그룹 패널 책임 → 일부 완화"],
+        architecture_concern="그룹 패널 책임 잔존",
+    )
+    out = postprocess(r, threshold=70)
+    assert out.prior_resolved[0].count("(부분)") == 1
+
+
+def test_prior_resolved_topic_match_uses_findings_after_filtering():
+    """confidence 필터 후 남은 findings 기준으로 prefix 결정."""
+    r = _result(
+        prior_resolved=["그룹 패널 책임 → helper 분리"],
+        quality_findings=[
+            QualityFinding(
+                category=FindingCategory.SMELL, file=None, line=None,
+                description="그룹 패널 책임 집중", suggestion="s", confidence=40,
+            ),
+        ],
+    )
+    out = postprocess(r, threshold=70)
+    # quality_findings 필터됨 → 주제 매칭 없음 → prefix 추가 안 함
+    assert not out.prior_resolved[0].startswith("(부분)")
