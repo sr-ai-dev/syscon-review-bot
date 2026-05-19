@@ -103,6 +103,12 @@ class TestBuildSystemPrompt:
         assert "grep" in s
         assert "정의" in s or "본문" in s
 
+    def test_includes_strict_mismatch_bar(self):
+        prompt = build_system_prompt()
+        assert "명확한 위반" in prompt
+        assert "0건" in prompt or "0건이 정상" in prompt
+        assert "절대 규칙" in prompt or "추론으로 뒤집" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
