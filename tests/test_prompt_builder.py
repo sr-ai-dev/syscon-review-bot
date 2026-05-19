@@ -96,6 +96,13 @@ class TestBuildSystemPrompt:
         assert "반박" in prompt or "반론" in prompt
         assert "미해결" in prompt
 
+    def test_system_prompt_mentions_tool_usage_guidance(self):
+        from src.review.prompt_builder import build_system_prompt
+        s = build_system_prompt()
+        assert "read_file" in s
+        assert "grep" in s
+        assert "정의" in s or "본문" in s
+
 
 class TestBuildUserPrompt:
     def _files(self):
