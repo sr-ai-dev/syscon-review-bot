@@ -96,7 +96,7 @@ def test_arch_concern_string_preserved():
 def test_prior_resolved_gets_partial_prefix_when_topic_still_in_findings():
     r = _result(
         prior_resolved=["그룹 패널 책임 → helper 분리로 일부 완화"],
-        architecture_concern="그룹 패널이 멤버 수집·집계·Command 실행 직접 담당",
+        architecture_concern="그룹 패널이 책임 분산 없이 멤버 수집·집계·Command 실행 직접 담당",
     )
     out = postprocess(r, threshold=70)
     assert out.prior_resolved[0].startswith("(부분)")
@@ -134,3 +134,36 @@ def test_prior_resolved_topic_match_uses_findings_after_filtering():
     out = postprocess(r, threshold=70)
     # quality_findings 필터됨 → 주제 매칭 없음 → prefix 추가 안 함
     assert not out.prior_resolved[0].startswith("(부분)")
+
+
+def test_prior_resolved_keeps_full_when_only_common_words_overlap():
+    """일반 어휘 ("처리", "에러", "함수") 2개 겹쳐도 prefix 부착 금지."""
+    r = _result(
+        prior_resolved=["로그 처리 에러 핸들링 → 수정 완료"],
+        architecture_concern="요청 처리 시 에러 발생 가능",
+    )
+    out = postprocess(r, threshold=70)
+    # 일반 어휘만 겹침 → 다른 주제로 간주 → prefix 없어야
+    assert not out.prior_resolved[0].startswith("(부분)")
+
+
+def test_prior_resolved_keeps_full_when_only_two_meaningful_tokens_overlap():
+    """의미 토큰 2개만 겹치면 prefix 부착 안 함 (>=3 임계)."""
+    r = _result(
+        prior_resolved=["LocationPort 기본값 보정 → 완료"],
+        architecture_concern="LocationPort 생성자에서 기본값 적용",
+    )
+    out = postprocess(r, threshold=70)
+    # "LocationPort", "기본값" 2개 매칭 — but 임계 3 미만 → 부착 안 함
+    assert not out.prior_resolved[0].startswith("(부분)")
+
+
+def test_prior_resolved_adds_partial_when_three_or_more_tokens_overlap():
+    """3개 이상 매칭이면 부착."""
+    r = _result(
+        prior_resolved=["그룹 패널의 멤버 수집 책임 → 분리 완료"],
+        architecture_concern="그룹 패널이 멤버 location 수집 책임 직접 담당",
+    )
+    out = postprocess(r, threshold=70)
+    # "그룹", "패널", "멤버", "수집", "책임" 등 충분히 매칭
+    assert out.prior_resolved[0].startswith("(부분)")

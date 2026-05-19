@@ -9,15 +9,24 @@ _PARTICLE_RE = re.compile(
     r"(이|가|을|를|은|는|의|에|로|으로|에서|이다|도|과|와|이나|나|이며|며|이고|고|만|"
     r"부터|까지|라|이라|처럼|같이|보다|한테|께|에게|으로서|로서|으로써|로써|에게서|한테서)$"
 )
+# 일반 한국어 어휘 — 우연 일치를 막기 위해 토큰 매칭 전 제거
+_STOPWORDS: set[str] = {
+    "처리", "에러", "함수", "변경", "구조", "개선", "수정", "추가",
+    "사용", "호출", "필요", "가능", "확인", "검증", "구현", "정의",
+    "코드", "파일", "값", "동작", "결과", "방향", "분기", "지원",
+}
 
 
 def _significant_tokens(text: str) -> set[str]:
-    """한글/영문 토큰을 추출하고 조사를 제거한 뒤 2글자 이상인 것만 반환."""
+    """한글/영문 토큰을 추출하고 조사를 제거한 뒤 2글자 이상이며 stopword 아닌 것만 반환."""
     result: set[str] = set()
     for tok in _TOKEN_RE.findall(text):
         normalized = _PARTICLE_RE.sub("", tok)
-        if len(normalized) >= 2:
-            result.add(normalized)
+        if len(normalized) < 2:
+            continue
+        if normalized in _STOPWORDS:
+            continue
+        result.add(normalized)
     return result
 
 
@@ -40,7 +49,7 @@ def _enforce_partial_prefix(
             continue
         item_tokens = _significant_tokens(item)
         overlap = item_tokens & all_finding_tokens
-        if len(overlap) >= 2:
+        if len(overlap) >= 3:
             out.append(f"(부분) {item}")
         else:
             out.append(item)
