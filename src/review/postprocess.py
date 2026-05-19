@@ -56,21 +56,32 @@ def _enforce_partial_prefix(
     return out
 
 
+def _location_key(item) -> tuple[str, int] | None:
+    """file 또는 line 중 하나라도 None이면 None을 반환 (dedup 후보 아님)."""
+    if item.file is None or item.line is None:
+        return None
+    return (item.file, item.line)
+
+
 def postprocess(result: ReviewResult, threshold: int = 70) -> ReviewResult:
     """LLM 출력 정리:
     - confidence < threshold finding drop
     - 같은 (file, line) mismatches + quality_findings 중복 → mismatch 우선 유지
+      단, file=None or line=None 인 항목은 위치 미확정으로 dedup 스킵
     - mismatches 변화에 따라 aligned 재계산 (spec_status=present 일 때만)
     - prior_resolved 항목의 주제가 다른 섹션에 남아있으면 (부분) prefix 자동 부착
     """
     kept_mismatches = [m for m in result.mismatches if m.confidence >= threshold]
 
-    mismatch_locations: set[tuple[str | None, int | None]] = {
-        (m.file, m.line) for m in kept_mismatches
+    mismatch_locations: set[tuple[str, int]] = {
+        key for m in kept_mismatches
+        if (key := _location_key(m)) is not None
     }
     kept_quality = [
         q for q in result.quality_findings
-        if q.confidence >= threshold and (q.file, q.line) not in mismatch_locations
+        if q.confidence >= threshold and (
+            (key := _location_key(q)) is None or key not in mismatch_locations
+        )
     ]
 
     new_aligned = result.aligned

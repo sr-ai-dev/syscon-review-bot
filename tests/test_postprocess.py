@@ -167,3 +167,45 @@ def test_prior_resolved_adds_partial_when_three_or_more_tokens_overlap():
     out = postprocess(r, threshold=70)
     # "그룹", "패널", "멤버", "수집", "책임" 등 충분히 매칭
     assert out.prior_resolved[0].startswith("(부분)")
+
+
+def test_dedup_does_not_collide_on_none_location_keys():
+    """file=None, line=None 인 묶음 finding 2개가 mismatch와 quality에 동시 있어도
+    quality 측이 silent drop되면 안 된다."""
+    r = _result(
+        mismatches=[
+            Mismatch(
+                file=None, line=None,
+                description="여러 파일 공통 스펙 위반",
+                suggestion="s", confidence=80,
+            ),
+        ],
+        quality_findings=[
+            QualityFinding(
+                category=FindingCategory.SMELL, file=None, line=None,
+                description="다른 주제의 여러 파일 공통 중복 코드",
+                suggestion="s", confidence=80,
+            ),
+        ],
+    )
+    out = postprocess(r, threshold=70)
+    assert len(out.mismatches) == 1
+    assert len(out.quality_findings) == 1  # 위치 키 None이라 dedup 스킵, 보존
+
+
+def test_dedup_still_removes_same_concrete_location():
+    """구체 (file, line) 일치는 여전히 dedup."""
+    r = _result(
+        mismatches=[
+            Mismatch(file="a.py", line=10, description="d", suggestion="s", confidence=80),
+        ],
+        quality_findings=[
+            QualityFinding(
+                category=FindingCategory.BUG, file="a.py", line=10,
+                description="같은 위치", suggestion="s", confidence=80,
+            ),
+        ],
+    )
+    out = postprocess(r, threshold=70)
+    assert len(out.mismatches) == 1
+    assert len(out.quality_findings) == 0
