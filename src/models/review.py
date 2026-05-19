@@ -21,6 +21,7 @@ class Mismatch(BaseModel):
     line: int | None = None
     description: str
     suggestion: str
+    confidence: int = Field(default=70, ge=0, le=100)
 
 
 class FindingCategory(str, Enum):
@@ -39,6 +40,7 @@ class QualityFinding(BaseModel):
     line: int | None = None
     description: str
     suggestion: str
+    confidence: int = Field(default=70, ge=0, le=100)
 
 
 class ReviewResult(BaseModel):
