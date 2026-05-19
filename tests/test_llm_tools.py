@@ -65,3 +65,16 @@ async def test_dispatch_truncates_oversized_result():
     )
     assert len(out) <= 1200
     assert "truncated" in out.lower() or "잘림" in out
+
+
+@pytest.mark.asyncio
+async def test_dispatch_default_max_chars_is_32000():
+    ex = AsyncMock()
+    ex.read_file.return_value = "x" * 50000
+    out = await dispatch_tool_call(
+        {"function": {"name": "read_file", "arguments": json.dumps({"path": "a.py"})}},
+        ex,
+    )
+    # default 가 32000으로 올라야 함
+    assert len(out) >= 32000
+    assert len(out) < 33000  # cap + 짧은 truncation 안내

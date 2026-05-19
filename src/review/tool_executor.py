@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import fnmatch
 import logging
 from typing import Protocol
 from urllib.parse import quote
@@ -38,13 +40,36 @@ class GitHubToolExecutor:
         return content
 
     async def grep(self, pattern: str, path_glob: str | None = None) -> list[dict]:
-        q = f"{pattern} repo:{self._repo}"
-        if path_glob:
-            q += f" path:{path_glob}"
         try:
-            data = await self._client.get_json(f"/search/code?q={quote(q)}")
+            tree_data = await self._client.get_json(
+                f"/repos/{self._repo}/git/trees/{quote(self._ref, safe='')}?recursive=1"
+            )
         except Exception as e:
-            logger.warning(f"grep({pattern}) failed: {e}")
+            logger.warning(f"grep tree fetch failed: {e}")
             return []
-        items = data.get("items", [])[:10]
-        return [{"path": item["path"]} for item in items]
+
+        paths = [
+            entry["path"]
+            for entry in tree_data.get("tree", [])
+            if entry.get("type") == "blob"
+        ]
+        if path_glob:
+            paths = [p for p in paths if fnmatch.fnmatch(p, path_glob)]
+        candidates = paths[:50]
+
+        async def _check(path: str) -> dict | None:
+            content = await self.read_file(path)
+            if pattern not in content:
+                return None
+            lines = content.split("\n")
+            matches = []
+            for idx, line in enumerate(lines, start=1):
+                if pattern in line:
+                    matches.append({"line": idx, "text": line.strip()[:200]})
+                    if len(matches) >= 5:
+                        break
+            return {"path": path, "matches": matches}
+
+        results = await asyncio.gather(*[_check(p) for p in candidates], return_exceptions=False)
+        hits = [r for r in results if r is not None]
+        return hits[:10]

@@ -34,9 +34,9 @@ TOOL_SCHEMAS: list[dict] = [
         "function": {
             "name": "grep",
             "description": (
-                "Search the repo for files matching a code pattern. "
-                "Use to locate where a symbol is defined when the file path is unknown. "
-                "Returns up to 10 matches as {path} entries."
+                "Search the repo for files containing a pattern (string substring). "
+                "Use to locate where a symbol or text appears in the codebase. "
+                "Returns up to 10 files; each entry has {path, matches: [{line, text}]}."
             ),
             "parameters": {
                 "type": "object",
@@ -60,7 +60,7 @@ TOOL_SCHEMAS: list[dict] = [
 async def dispatch_tool_call(
     tool_call: dict,
     executor: ToolExecutor,
-    max_chars: int = 12000,
+    max_chars: int = 32000,
 ) -> str:
     name = tool_call["function"]["name"]
     try:

@@ -34,22 +34,93 @@ async def test_read_file_returns_empty_on_404():
 
 
 @pytest.mark.asyncio
-async def test_grep_returns_path_matches_capped():
+async def test_grep_uses_git_trees_and_finds_matching_paths():
     mock_gh = AsyncMock()
-    mock_gh.get_json.return_value = {
-        "items": [
-            {"path": f"src/file_{i}.py"} for i in range(30)
+    # tree 응답
+    tree_resp = {
+        "tree": [
+            {"path": "src/foo/getWaypointNode.ts", "type": "blob"},
+            {"path": "src/bar/other.ts", "type": "blob"},
+            {"path": "src/dir/", "type": "tree"},
         ]
     }
+    # content 응답 — 첫 번째 파일에 패턴 있음
+    contents = {
+        "src/foo/getWaypointNode.ts": "def x():\n  getWaypointNode()\n  return 1\n",
+        "src/bar/other.ts": "no match here\n",
+    }
+    async def get_json(path):
+        if "git/trees" in path:
+            return tree_resp
+        # contents/<file>
+        for fname, body in contents.items():
+            if fname in path:
+                import base64
+                return {"content": base64.b64encode(body.encode()).decode(), "encoding": "base64"}
+        return {}
+    mock_gh.get_json = AsyncMock(side_effect=get_json)
+
     ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
-    matches = await ex.grep("foo")
-    assert len(matches) <= 10
-    assert all("path" in m for m in matches)
+
+    matches = await ex.grep("getWaypointNode")
+    paths = [m["path"] for m in matches]
+    assert "src/foo/getWaypointNode.ts" in paths
+    assert "src/bar/other.ts" not in paths
+    # matches 내부에 line 번호와 text가 있어야 함
+    foo_match = next(m for m in matches if m["path"] == "src/foo/getWaypointNode.ts")
+    assert any("getWaypointNode" in mm["text"] for mm in foo_match["matches"])
 
 
 @pytest.mark.asyncio
-async def test_grep_swallows_search_errors_returns_empty():
+async def test_grep_applies_path_glob_filter():
     mock_gh = AsyncMock()
-    mock_gh.get_json.side_effect = Exception("rate limited")
+    tree_resp = {
+        "tree": [
+            {"path": "src/a.py", "type": "blob"},
+            {"path": "src/b.ts", "type": "blob"},
+            {"path": "docs/c.md", "type": "blob"},
+        ]
+    }
+    import base64
+    async def get_json(path):
+        if "git/trees" in path:
+            return tree_resp
+        return {"content": base64.b64encode(b"foo bar").decode(), "encoding": "base64"}
+    mock_gh.get_json = AsyncMock(side_effect=get_json)
+
+    ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
+    matches = await ex.grep("foo", path_glob="src/*.ts")
+    paths = [m["path"] for m in matches]
+    assert paths == ["src/b.ts"]
+
+
+@pytest.mark.asyncio
+async def test_grep_caps_candidate_files_to_50():
+    mock_gh = AsyncMock()
+    tree_resp = {
+        "tree": [
+            {"path": f"src/f{i}.ts", "type": "blob"} for i in range(200)
+        ]
+    }
+    import base64
+    async def get_json(path):
+        if "git/trees" in path:
+            return tree_resp
+        return {"content": base64.b64encode(b"match!").decode(), "encoding": "base64"}
+    mock_gh.get_json = AsyncMock(side_effect=get_json)
+
+    ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
+    matches = await ex.grep("match!")
+    # 매칭 결과는 최대 10개로 cap
+    assert len(matches) <= 10
+    # contents fetch는 후보 50개에 대해서만 실행됐어야 함 (tree 1회 + contents 50회 = 51회)
+    assert mock_gh.get_json.await_count <= 51
+
+
+@pytest.mark.asyncio
+async def test_grep_returns_empty_when_tree_fetch_fails():
+    mock_gh = AsyncMock()
+    mock_gh.get_json = AsyncMock(side_effect=Exception("tree boom"))
+
     ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
     assert await ex.grep("foo") == []
