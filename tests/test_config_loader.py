@@ -67,3 +67,10 @@ max_tool_iterations: 4
         cfg = load_config_from_yaml(yaml_text)
         assert cfg.enable_tool_use is False
         assert cfg.max_tool_iterations == 4
+
+    def test_loads_confidence_threshold_key(self):
+        yaml_text = """
+confidence_threshold: 80
+"""
+        cfg = load_config_from_yaml(yaml_text)
+        assert cfg.confidence_threshold == 80

@@ -39,5 +39,7 @@ def load_config_from_yaml(yaml_content: str) -> ReviewConfig:
         config_kwargs["enable_tool_use"] = data["enable_tool_use"]
     if "max_tool_iterations" in data:
         config_kwargs["max_tool_iterations"] = data["max_tool_iterations"]
+    if "confidence_threshold" in data:
+        config_kwargs["confidence_threshold"] = data["confidence_threshold"]
 
     return ReviewConfig(**config_kwargs)
