@@ -20,6 +20,7 @@ from src.review.prompt_builder import build_system_prompt, build_user_prompt
 from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
 from src.review.hunk_expander import expand_file_diff
 from src.review.compressor import compress_files
+from src.review.judge import run_judge
 
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,8 @@ async def review_pr(
 
     chosen_model = model_override or config.model
     result = await gpt_client.review(system_prompt, user_prompt, model=chosen_model)
+    if config.enable_judge:
+        result = await run_judge(gpt_client, result, model=chosen_model)
 
     decision = compute_decision(result)
     await submit_review(github_client, context.repo, context.pr_number, result)

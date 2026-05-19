@@ -15,3 +15,4 @@ class ReviewConfig(BaseModel):
     ignore: IgnoreConfig = Field(default_factory=IgnoreConfig)
     max_expand_lines: int = 50  # backward search cap for hunk expansion
     token_budget: int = 60000
+    enable_judge: bool = True

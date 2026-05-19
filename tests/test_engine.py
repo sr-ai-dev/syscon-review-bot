@@ -71,7 +71,7 @@ async def test_review_pr_submits_when_present(context, aligned_result):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
+        new_callable=AsyncMock, return_value=ReviewConfig(enable_judge=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -179,7 +179,7 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
@@ -309,7 +309,7 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
@@ -366,7 +366,7 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
          patch("src.review.engine.get_repo_file", new_callable=AsyncMock, return_value=full_source):
         await review_pr(context, mock_github, mock_gpt)
 
@@ -390,11 +390,58 @@ async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligne
     mock_github = _mock_github(diff=diff)
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000)), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000, enable_judge=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
     assert "small.py" in captured["user"]
     assert ("a" * 1000) not in captured["user"]
     assert "토큰 예산" in captured["user"] or "huge.py" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_review_pr_runs_judge_when_enabled(context):
+    first = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="원본",
+        prior_resolved=["X → 일부"], architecture_concern="X 잔존",
+    )
+    judged = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="judged",
+        prior_resolved=["(부분) X → 일부, 잔존은 아키텍처 참조"],
+        architecture_concern="X 잔존",
+    )
+    call_count = {"n": 0}
+    async def fake_review(system, user, model=None):
+        call_count["n"] += 1
+        return first if call_count["n"] == 1 else judged
+
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=True)), \
+         _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert call_count["n"] == 2
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "(부분)" in body or "🔶" in body
+
+
+@pytest.mark.asyncio
+async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
+    call_count = {"n": 0}
+    async def fake_review(system, user, model=None):
+        call_count["n"] += 1
+        return aligned_result
+
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.side_effect = fake_review
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+         _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    assert call_count["n"] == 1
 
 
 @pytest.mark.asyncio
@@ -412,7 +459,7 @@ async def test_expand_files_swallows_non_404_errors(context, aligned_result):
     async def raise_500(*args, **kwargs):
         raise RuntimeError("simulated 500")
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
          patch("src.review.engine.get_repo_file", side_effect=raise_500):
         await review_pr(context, mock_github, mock_gpt)
 
