@@ -44,6 +44,7 @@ class GPTClient:
         model: str | None = None,
         tool_executor: ToolExecutor | None = None,
         max_tool_iterations: int = 8,
+        reasoning_effort: str | None = None,
     ) -> ReviewResult:
         chosen_model = model or self._default_model
         messages: list[dict] = [
@@ -51,13 +52,20 @@ class GPTClient:
             {"role": "user", "content": user_prompt},
         ]
 
-        if tool_executor is None:
-            response = await self._call_openai(
-                model=chosen_model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0.1,
-            )
+        # reasoning_effort 사용 시 tool_executor 무시 (chat.completions API 제약)
+        use_tools = tool_executor is not None and reasoning_effort is None
+
+        if not use_tools:
+            kwargs = {
+                "model": chosen_model,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+            }
+            if reasoning_effort:
+                kwargs["reasoning_effort"] = reasoning_effort
+            else:
+                kwargs["temperature"] = 0.1
+            response = await self._call_openai(**kwargs)
             return self._parse(response.choices[0].message.content)
 
         for _ in range(max_tool_iterations):
@@ -106,6 +114,32 @@ class GPTClient:
     def _parse(self, content: str) -> ReviewResult:
         try:
             data = json.loads(content)
+        except json.JSONDecodeError:
+            data = self._extract_last_json_object(content)
+        try:
             return ReviewResult(**data)
-        except (json.JSONDecodeError, ValidationError) as e:
+        except ValidationError as e:
             raise ValueError(f"Failed to parse GPT response: {e}\nContent: {content}")
+
+    @staticmethod
+    def _extract_last_json_object(text: str) -> dict:
+        """Stream에 여러 JSON 객체가 있으면 마지막 객체 반환 (reasoning 모델이 부수 출력하는 경우)."""
+        decoder = json.JSONDecoder()
+        pos = 0
+        last = None
+        n = len(text)
+        while pos < n:
+            while pos < n and text[pos].isspace():
+                pos += 1
+            if pos >= n:
+                break
+            try:
+                obj, end = decoder.raw_decode(text, pos)
+                if isinstance(obj, dict):
+                    last = obj
+                pos = end
+            except json.JSONDecodeError:
+                pos += 1
+        if last is None:
+            raise ValueError(f"Failed to parse GPT response: no JSON object found\nContent: {text}")
+        return last

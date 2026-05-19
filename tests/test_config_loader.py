@@ -74,3 +74,17 @@ confidence_threshold: 80
 """
         cfg = load_config_from_yaml(yaml_text)
         assert cfg.confidence_threshold == 80
+
+    def test_loads_reasoning_effort_key(self):
+        yaml_text = """
+reasoning_effort: medium
+"""
+        cfg = load_config_from_yaml(yaml_text)
+        assert cfg.reasoning_effort == "medium"
+
+    def test_reasoning_effort_can_be_none(self):
+        yaml_text = """
+reasoning_effort: null
+"""
+        cfg = load_config_from_yaml(yaml_text)
+        assert cfg.reasoning_effort is None
