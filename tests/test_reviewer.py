@@ -233,6 +233,31 @@ class TestFilterBotReviews:
         assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
 
 
+def test_mismatch_renders_with_confidence_tag():
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
+        mismatches=[
+            Mismatch(file="a.py", line=10, description="d", suggestion="s", confidence=85),
+        ],
+    )
+    body = format_review_body(result)
+    assert "conf 85" in body
+
+
+def test_quality_finding_renders_with_confidence_tag():
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True, summary="s",
+        quality_findings=[
+            QualityFinding(
+                category=FindingCategory.BUG, file="x.py", line=1,
+                description="d", suggestion="s", confidence=72,
+            ),
+        ],
+    )
+    body = format_review_body(result)
+    assert "conf 72" in body
+
+
 class TestSubmitReview:
     @pytest.mark.asyncio
     async def test_always_comment_event(self):
