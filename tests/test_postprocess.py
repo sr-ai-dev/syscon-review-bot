@@ -209,3 +209,41 @@ def test_dedup_still_removes_same_concrete_location():
     out = postprocess(r, threshold=70)
     assert len(out.mismatches) == 1
     assert len(out.quality_findings) == 0
+
+
+def test_prior_resolved_no_prefix_when_overlap_exactly_one():
+    """1개 토큰만 일치하면 부착 안 함 (>=3 임계)."""
+    r = _result(
+        prior_resolved=["그룹 멤버 책임 분리 → 완료"],
+        architecture_concern="완전 다른 주제의 데이터 흐름 문제",
+    )
+    out = postprocess(r, threshold=70)
+    assert not out.prior_resolved[0].startswith("(부분)")
+
+
+def test_aligned_not_recomputed_when_spec_missing():
+    """spec_status=MISSING이면 aligned 재계산 안 함 (false 유지)."""
+    r = ReviewResult(
+        spec_status=SpecStatus.MISSING, aligned=False, summary="s",
+        mismatches=[],
+    )
+    out = postprocess(r, threshold=70)
+    assert out.aligned is False  # MISSING은 항상 False, 재계산 안 됨
+    assert out.spec_status == SpecStatus.MISSING
+
+
+def test_significant_tokens_strips_korean_particles():
+    """조사 제거 검증."""
+    from src.review.postprocess import _significant_tokens
+    tokens = _significant_tokens("패널이 책임을 떠안고 있다")
+    # 조사 제거 후 "패널", "책임", "떠안" 남아야
+    assert "패널" in tokens
+    assert "책임" in tokens
+
+
+def test_significant_tokens_excludes_stopwords():
+    """stopword 제외 검증."""
+    from src.review.postprocess import _significant_tokens
+    tokens = _significant_tokens("에러 처리 함수 추가")
+    # 모두 stopword라 빈 set
+    assert tokens == set()
