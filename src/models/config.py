@@ -16,3 +16,5 @@ class ReviewConfig(BaseModel):
     max_expand_lines: int = 50  # backward search cap for hunk expansion
     token_budget: int = 60000
     enable_judge: bool = False  # judge 1.c 룰이 부분→완전 잘못 승격하는 케이스 발견, 기본 OFF
+    enable_tool_use: bool = True
+    max_tool_iterations: int = 8

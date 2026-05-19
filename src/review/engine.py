@@ -21,6 +21,7 @@ from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
 from src.review.hunk_expander import expand_file_diff
 from src.review.compressor import compress_files
 from src.review.judge import run_judge
+from src.review.tool_executor import GitHubToolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,18 @@ async def review_pr(
         return
 
     chosen_model = model_override or config.model
-    result = await gpt_client.review(system_prompt, user_prompt, model=chosen_model)
+
+    executor = None
+    if config.enable_tool_use:
+        executor = GitHubToolExecutor(github_client, context.repo, head_sha)
+
+    result = await gpt_client.review(
+        system_prompt,
+        user_prompt,
+        model=chosen_model,
+        tool_executor=executor,
+        max_tool_iterations=config.max_tool_iterations,
+    )
     if config.enable_judge:
         result = await run_judge(gpt_client, result, model=chosen_model)
 
