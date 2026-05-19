@@ -47,3 +47,14 @@ ignore:
         config = load_config_from_yaml(yaml_content)
         assert config.model is None
         assert config.ignore.extensions == [".md"]
+
+    def test_loads_judge_compression_expand_keys(self):
+        yaml_text = """
+enable_judge: false
+token_budget: 30000
+max_expand_lines: 80
+"""
+        cfg = load_config_from_yaml(yaml_text)
+        assert cfg.enable_judge is False
+        assert cfg.token_budget == 30000
+        assert cfg.max_expand_lines == 80
