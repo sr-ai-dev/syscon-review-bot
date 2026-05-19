@@ -35,5 +35,9 @@ def load_config_from_yaml(yaml_content: str) -> ReviewConfig:
         config_kwargs["token_budget"] = data["token_budget"]
     if "max_expand_lines" in data:
         config_kwargs["max_expand_lines"] = data["max_expand_lines"]
+    if "enable_tool_use" in data:
+        config_kwargs["enable_tool_use"] = data["enable_tool_use"]
+    if "max_tool_iterations" in data:
+        config_kwargs["max_tool_iterations"] = data["max_tool_iterations"]
 
     return ReviewConfig(**config_kwargs)

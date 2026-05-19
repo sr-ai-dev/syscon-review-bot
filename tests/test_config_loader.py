@@ -58,3 +58,12 @@ max_expand_lines: 80
         assert cfg.enable_judge is False
         assert cfg.token_budget == 30000
         assert cfg.max_expand_lines == 80
+
+    def test_loads_tool_use_keys(self):
+        yaml_text = """
+enable_tool_use: false
+max_tool_iterations: 4
+"""
+        cfg = load_config_from_yaml(yaml_text)
+        assert cfg.enable_tool_use is False
+        assert cfg.max_tool_iterations == 4
