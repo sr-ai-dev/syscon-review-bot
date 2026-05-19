@@ -198,3 +198,11 @@ class TestBuildUserPrompt:
             base_branch="main", head_branch="f",
         )
         assert "PR 대화 히스토리" not in prompt
+
+
+class TestSystemPromptConfidence:
+    def test_system_prompt_requires_confidence_in_json_schema(self):
+        from src.review.prompt_builder import build_system_prompt
+        s = build_system_prompt()
+        schema_section = s[s.index("출력 형식"):]
+        assert schema_section.count("confidence") >= 2  # mismatches + quality_findings
