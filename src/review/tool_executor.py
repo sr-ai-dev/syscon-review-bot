@@ -21,8 +21,11 @@ class GitHubToolExecutor:
         self._client = client
         self._repo = repo
         self._ref = ref
+        self._file_cache: dict[str, str] = {}
 
     async def read_file(self, path: str) -> str:
+        if path in self._file_cache:
+            return self._file_cache[path]
         try:
             data = await self._client.get_json(
                 f"/repos/{self._repo}/contents/{quote(path, safe='/')}?ref={quote(self._ref, safe='')}"
@@ -33,10 +36,14 @@ class GitHubToolExecutor:
         content = data.get("content", "")
         if data.get("encoding") == "base64":
             try:
-                return base64.b64decode(content).decode("utf-8", errors="replace")
+                decoded = base64.b64decode(content).decode("utf-8", errors="replace")
+                self._file_cache[path] = decoded
+                return decoded
             except Exception as e:
                 logger.warning(f"base64 decode failed for {path}: {e}")
+                self._file_cache[path] = ""
                 return ""
+        self._file_cache[path] = content
         return content
 
     async def grep(self, pattern: str, path_glob: str | None = None) -> list[dict]:
@@ -55,6 +62,7 @@ class GitHubToolExecutor:
         ]
         if path_glob:
             paths = [p for p in paths if fnmatch.fnmatch(p, path_glob)]
+        truncated_count = max(0, len(paths) - 50)
         candidates = paths[:50]
 
         async def _check(path: str) -> dict | None:
@@ -72,4 +80,7 @@ class GitHubToolExecutor:
 
         results = await asyncio.gather(*[_check(p) for p in candidates], return_exceptions=False)
         hits = [r for r in results if r is not None]
-        return hits[:10]
+        final = hits[:10]
+        if truncated_count > 0:
+            final.append({"_truncated_candidates": truncated_count})
+        return final

@@ -485,6 +485,17 @@ async def test_review_pr_omits_tool_executor_when_disabled(context, aligned_resu
 
 
 @pytest.mark.asyncio
+async def test_load_repo_config_falls_back_to_default_on_non_404_error():
+    from src.review.engine import load_repo_config
+    from src.review.config_loader import DEFAULT_CONFIG
+    mock_gh = AsyncMock()
+    # 5xx 시뮬레이션
+    mock_gh.get_json = AsyncMock(side_effect=RuntimeError("simulated 500"))
+    cfg = await load_repo_config(mock_gh, "owner/repo", "deadbeef")
+    assert cfg is DEFAULT_CONFIG
+
+
+@pytest.mark.asyncio
 async def test_expand_files_swallows_non_404_errors(context, aligned_result):
     """If get_repo_file raises (e.g., 500), engine still proceeds with original FileDiff."""
     diff = (

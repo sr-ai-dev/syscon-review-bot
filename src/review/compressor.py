@@ -25,4 +25,11 @@ def compress_files(
             remaining -= tokens
         else:
             kept.append(f)
+
+    # 모든 파일이 budget 초과로 drop된 경우, 가장 작은 파일 1개는 강제 keep
+    if not kept and sized:
+        smallest_tokens, smallest_f = min(sized, key=lambda x: x[0])
+        kept.append(smallest_f)
+        dropped = [p for p in dropped if p != smallest_f.path]
+
     return kept, dropped

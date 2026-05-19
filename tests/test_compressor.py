@@ -24,6 +24,20 @@ def test_drops_largest_files_first_until_under_budget():
 
 
 def test_dropped_paths_in_order_of_size_desc():
+    # drop largest first; once remaining fits in budget the rest are kept.
+    # Use budget=200: total exceeds it → drop c first, then b; a fits after.
     files = [_fd("a.py", 1000), _fd("b.py", 2000), _fd("c.py", 3000)]
-    _, dropped = compress_files(files, budget_tokens=100)
-    assert dropped == ["c.py", "b.py", "a.py"]
+    kept, dropped = compress_files(files, budget_tokens=200)
+    assert dropped == ["c.py", "b.py"]
+    assert len(kept) == 1
+    assert kept[0].path == "a.py"
+
+
+def test_keeps_smallest_file_when_all_exceed_budget():
+    files = [_fd("a.py", 5000), _fd("b.py", 2000), _fd("c.py", 3000)]
+    kept, dropped = compress_files(files, budget_tokens=100)
+    # 모두 100 초과지만 가장 작은 b.py는 keep
+    assert len(kept) == 1
+    assert kept[0].path == "b.py"
+    assert "b.py" not in dropped
+    assert set(dropped) == {"a.py", "c.py"}

@@ -17,7 +17,7 @@ _PATTERNS = {
         re.compile(r"^\s*(export\s+)?(async\s+)?function\s+\w+"),
         re.compile(r"^\s*(export\s+)?class\s+\w+"),
         re.compile(r"^\s*(export\s+)?const\s+\w+\s*[:=]"),
-        re.compile(r"^\s*(public|private|protected)?\s*(async\s+)?\w+\s*\([^)]*\)\s*[:{]"),
+        re.compile(r"^\s*(public|private|protected)?\s*(async\s+)?(?!(?:if|while|for|switch|return|catch|do)\b)\w+\s*\([^)]*\)\s*[:{]"),
     ],
     "svelte": [
         re.compile(r"^\s*<script"),

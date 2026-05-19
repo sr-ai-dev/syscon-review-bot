@@ -28,3 +28,21 @@ def test_generic_falls_back_to_common_patterns():
     src = "def x():\n  pass\nfunction y() {}\n"
     headers = find_header_lines(src, "generic")
     assert 1 in headers and 3 in headers
+
+
+def test_typescript_control_keywords_not_treated_as_headers():
+    src = "\n".join([
+        "if (x) {",        # 1 — header 아님
+        "  y();",          # 2
+        "}",               # 3
+        "while (z) {",     # 4 — header 아님
+        "  w();",          # 5
+        "}",               # 6
+        "function realHeader() {",  # 7 — header 맞음
+        "  return 1;",     # 8
+        "}",               # 9
+    ])
+    headers = find_header_lines(src, "typescript")
+    assert 7 in headers
+    assert 1 not in headers
+    assert 4 not in headers

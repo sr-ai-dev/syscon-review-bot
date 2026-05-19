@@ -78,7 +78,7 @@ async def dispatch_tool_call(
     except KeyError as e:
         return f"error: missing argument {e}"
     except Exception as e:
-        logger.warning(f"tool {name} raised: {e}")
+        logger.exception(f"tool {name} raised")
         return f"error: {e}"
 
     return f"error: unknown tool '{name}'"

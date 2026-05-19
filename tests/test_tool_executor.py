@@ -111,8 +111,9 @@ async def test_grep_caps_candidate_files_to_50():
 
     ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
     matches = await ex.grep("match!")
-    # 매칭 결과는 최대 10개로 cap
-    assert len(matches) <= 10
+    # 실제 매칭 결과는 최대 10개로 cap (메타 sentinel 제외)
+    real_hits = [m for m in matches if "path" in m]
+    assert len(real_hits) <= 10
     # contents fetch는 후보 50개에 대해서만 실행됐어야 함 (tree 1회 + contents 50회 = 51회)
     assert mock_gh.get_json.await_count <= 51
 
@@ -124,3 +125,37 @@ async def test_grep_returns_empty_when_tree_fetch_fails():
 
     ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
     assert await ex.grep("foo") == []
+
+
+@pytest.mark.asyncio
+async def test_read_file_caches_within_executor_lifetime():
+    import base64
+    mock_gh = AsyncMock()
+    mock_gh.get_json = AsyncMock(return_value={
+        "content": base64.b64encode(b"hello").decode(),
+        "encoding": "base64",
+    })
+    from src.review.tool_executor import GitHubToolExecutor
+    ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
+    a = await ex.read_file("a.py")
+    b = await ex.read_file("a.py")
+    assert a == b == "hello"
+    # 두 번째 호출은 캐시 — get_json 1회만
+    assert mock_gh.get_json.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_appends_truncated_meta_when_candidates_capped():
+    import base64
+    mock_gh = AsyncMock()
+    tree_resp = {"tree": [{"path": f"src/f{i}.ts", "type": "blob"} for i in range(200)]}
+    async def get_json(path):
+        if "git/trees" in path:
+            return tree_resp
+        return {"content": base64.b64encode(b"no_match_pattern").decode(), "encoding": "base64"}
+    mock_gh.get_json = AsyncMock(side_effect=get_json)
+    from src.review.tool_executor import GitHubToolExecutor
+    ex = GitHubToolExecutor(mock_gh, "owner/repo", "deadbeef")
+    matches = await ex.grep("foo")  # 매칭 0개
+    # truncated meta는 그래도 등장 (200-50=150)
+    assert any(m.get("_truncated_candidates") == 150 for m in matches if isinstance(m, dict))

@@ -75,7 +75,7 @@ class GPTClient:
 
             messages.append({
                 "role": "assistant",
-                "content": msg.content,
+                "content": msg.content or None,
                 "tool_calls": [
                     {
                         "id": tc.id,

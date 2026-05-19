@@ -39,7 +39,11 @@ async def load_repo_config(
     ref: str,
     config_path: str = ".github/review-bot.yml",
 ) -> ReviewConfig:
-    content = await get_repo_file(github_client, repo, config_path, ref)
+    try:
+        content = await get_repo_file(github_client, repo, config_path, ref)
+    except Exception as e:
+        logger.warning(f"Config fetch failed at {config_path} in {repo}: {e} — using defaults")
+        return DEFAULT_CONFIG
     if content is None:
         logger.info(f"No config file at {config_path} in {repo}, using defaults")
         return DEFAULT_CONFIG
