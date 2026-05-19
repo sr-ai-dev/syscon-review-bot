@@ -21,6 +21,7 @@ from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
 from src.review.hunk_expander import expand_file_diff
 from src.review.compressor import compress_files
 from src.review.judge import run_judge
+from src.review.postprocess import postprocess
 from src.review.tool_executor import GitHubToolExecutor
 
 
@@ -133,6 +134,7 @@ async def review_pr(
         tool_executor=executor,
         max_tool_iterations=config.max_tool_iterations,
     )
+    result = postprocess(result, threshold=config.confidence_threshold)
     if config.enable_judge:
         result = await run_judge(gpt_client, result, model=chosen_model)
 

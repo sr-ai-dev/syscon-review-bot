@@ -496,6 +496,32 @@ async def test_load_repo_config_falls_back_to_default_on_non_404_error():
 
 
 @pytest.mark.asyncio
+async def test_review_pr_applies_postprocess_filter(context):
+    """엔진이 LLM 응답에 postprocess를 적용해 저신뢰 finding을 제거."""
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=False, summary="혼합",
+        mismatches=[
+            Mismatch(file="a.py", line=1, description="확실 finding", suggestion="s", confidence=85),
+            Mismatch(file="b.py", line=2, description="약함 finding", suggestion="s", confidence=40),
+        ],
+    )
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_judge=False, enable_tool_use=False, confidence_threshold=70),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "확실 finding" in body
+    assert "약함 finding" not in body
+
+
+@pytest.mark.asyncio
 async def test_expand_files_swallows_non_404_errors(context, aligned_result):
     """If get_repo_file raises (e.g., 500), engine still proceeds with original FileDiff."""
     diff = (

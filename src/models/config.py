@@ -18,3 +18,4 @@ class ReviewConfig(BaseModel):
     enable_judge: bool = False  # judge 1.c 룰이 부분→완전 잘못 승격하는 케이스 발견, 기본 OFF
     enable_tool_use: bool = True
     max_tool_iterations: int = 8
+    confidence_threshold: int = 70
