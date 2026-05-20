@@ -20,3 +20,4 @@ class ReviewConfig(BaseModel):
     max_tool_iterations: int = 8
     confidence_threshold: int = 70
     reasoning_effort: str | None = "high"  # "low"|"medium"|"high"|None. None=비활성. 사용 시 tools/temperature 비활성됨.
+    require_spec_files: bool = True

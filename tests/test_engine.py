@@ -74,7 +74,7 @@ async def test_review_pr_submits_when_present(context, aligned_result):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(enable_judge=False),
+        new_callable=AsyncMock, return_value=ReviewConfig(enable_judge=False, require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -96,7 +96,7 @@ async def test_review_pr_request_changes_on_mismatches(context):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -112,7 +112,7 @@ async def test_review_pr_request_changes_on_missing_spec(context, missing_spec_r
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -128,7 +128,7 @@ async def test_review_pr_skips_empty_diff(context):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -182,7 +182,7 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
@@ -236,7 +236,7 @@ async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_re
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     assert "BOT_SELF_ISSUE_COMMENT" not in captured["user"]
@@ -248,7 +248,7 @@ async def test_review_pr_uses_config_model(context, aligned_result):
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = aligned_result
 
-    cfg = ReviewConfig(model="gpt-5-mini")
+    cfg = ReviewConfig(model="gpt-5-mini", require_spec_files=False)
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=cfg,
@@ -265,7 +265,7 @@ async def test_review_pr_dry_run_skips_gpt_and_submit(context, capsys):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(
             context=context, github_client=mock_github, gpt_client=mock_gpt,
@@ -312,7 +312,7 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     user_prompt = captured["user"]
@@ -333,7 +333,7 @@ async def test_review_pr_renders_prior_resolved_in_body(context):
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -369,7 +369,7 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), \
          patch("src.review.engine.get_repo_file", new_callable=AsyncMock, return_value=full_source):
         await review_pr(context, mock_github, mock_gpt)
 
@@ -393,7 +393,7 @@ async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligne
     mock_github = _mock_github(diff=diff)
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000, enable_judge=False)), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000, enable_judge=False, require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
     assert "small.py" in captured["user"]
     assert ("a" * 1000) not in captured["user"]
@@ -420,7 +420,7 @@ async def test_review_pr_runs_judge_when_enabled(context):
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=True)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=True, require_spec_files=False)), \
          _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
@@ -440,7 +440,7 @@ async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), \
          _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
@@ -459,7 +459,7 @@ async def test_review_pr_creates_tool_executor_when_enabled(context, aligned_res
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=True, max_tool_iterations=5)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=True, max_tool_iterations=5, require_spec_files=False)), \
          _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
@@ -480,7 +480,7 @@ async def test_review_pr_omits_tool_executor_when_disabled(context, aligned_resu
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=False)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=False, require_spec_files=False)), \
          _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
@@ -515,7 +515,7 @@ async def test_review_pr_applies_postprocess_filter(context):
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock,
-        return_value=ReviewConfig(enable_judge=False, enable_tool_use=False, confidence_threshold=70),
+        return_value=ReviewConfig(enable_judge=False, enable_tool_use=False, confidence_threshold=70, require_spec_files=False),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
@@ -539,7 +539,7 @@ async def test_expand_files_swallows_non_404_errors(context, aligned_result):
     async def raise_500(*args, **kwargs):
         raise RuntimeError("simulated 500")
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), \
          patch("src.review.engine.get_repo_file", side_effect=raise_500):
         await review_pr(context, mock_github, mock_gpt)
 
@@ -567,7 +567,7 @@ async def test_review_pr_falls_back_to_files_api_on_406(context, aligned_result)
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = aligned_result
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     mock_github.get_json_list.assert_called_once()
@@ -587,6 +587,116 @@ async def test_review_pr_reraises_non_406_http_error(context):
     mock_github.get.side_effect = raise_500
     mock_gpt = AsyncMock()
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), _NO_EXPAND:
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(require_spec_files=False)), _NO_EXPAND:
         with pytest.raises(httpx.HTTPStatusError, match="500"):
             await review_pr(context, mock_github, mock_gpt)
+
+
+def _mock_github_with_spec(spec_files, code_files=None, **dispatch_kwargs):
+    """Helper that creates diff with spec/ and optional code files."""
+    parts = []
+    for f in (spec_files or []) + (code_files or []):
+        parts.append(f"diff --git a/{f} b/{f}\n@@ -1 +1 @@\n+x")
+    diff = "\n".join(parts)
+    return _mock_github(diff=diff, **dispatch_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_blocks_when_no_spec_files(context):
+    mock_github = _mock_github()  # default diff: a.py only
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_called_once()
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "조건 불충분" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_blocks_when_only_one_spec_file(context):
+    mock_github = _mock_github_with_spec(
+        spec_files=["spec/login/requirements.md"],
+        code_files=["src/auth.py"],
+    )
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_not_called()
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "조건 불충분" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_passes_with_two_spec_files(context, aligned_result):
+    mock_github = _mock_github_with_spec(
+        spec_files=["spec/login/requirements.md", "spec/login/design.md"],
+        code_files=["src/auth.py"],
+    )
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_called_once()
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "조건 불충분" not in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_blocks_on_406_fallback(context):
+    """406 fallback으로 파일 목록 재구성 후에도 spec gate 동작 검증."""
+
+    async def raise_406(*args, **kwargs):
+        request = httpx.Request("GET", "https://api.github.com/repos/owner/repo/pulls/42")
+        response = httpx.Response(406, request=request)
+        raise httpx.HTTPStatusError("406 Not Acceptable", request=request, response=response)
+
+    pr_files = [
+        {"filename": "src/auth.py", "patch": "@@ -1 +1 @@\n+x", "additions": 1, "deletions": 0},
+    ]
+
+    mock_github = _mock_github()
+    mock_github.get.side_effect = raise_406
+    mock_github.get_json_list.return_value = pr_files
+
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_not_called()
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "조건 불충분" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_skipped_when_disabled(context, aligned_result):
+    mock_github = _mock_github()  # no spec files
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_called_once()

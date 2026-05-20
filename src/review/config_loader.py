@@ -43,5 +43,7 @@ def load_config_from_yaml(yaml_content: str) -> ReviewConfig:
         config_kwargs["confidence_threshold"] = data["confidence_threshold"]
     if "reasoning_effort" in data:
         config_kwargs["reasoning_effort"] = data["reasoning_effort"]
+    if "require_spec_files" in data:
+        config_kwargs["require_spec_files"] = data["require_spec_files"]
 
     return ReviewConfig(**config_kwargs)
