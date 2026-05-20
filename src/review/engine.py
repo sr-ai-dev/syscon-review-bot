@@ -14,7 +14,7 @@ from src.github.pr import (
     get_pr_review_comments,
     get_repo_file,
 )
-from src.github.reviewer import filter_bot_reviews, submit_review
+from src.github.reviewer import filter_bot_reviews, submit_review, submit_spec_gate_review
 from src.models.config import ReviewConfig
 from src.review.decision import compute_decision
 from src.review.diff_parser import filter_files, parse_diff, parse_pr_files
@@ -25,6 +25,7 @@ from src.review.hunk_expander import expand_file_diff
 from src.review.compressor import compress_files
 from src.review.judge import run_judge
 from src.review.postprocess import postprocess
+from src.spec_check import check_spec_files
 from src.review.tool_executor import GitHubToolExecutor
 
 
@@ -80,6 +81,14 @@ async def review_pr(
         files = parse_pr_files(raw_files)
     if not files:
         logger.info("Empty diff, skipping")
+        return
+
+    spec_result = check_spec_files([f.path for f in files])
+    if config.require_spec_files and not spec_result.ok:
+        logger.info(f"Spec gate failed: {spec_result.message}")
+        await submit_spec_gate_review(
+            github_client, context.repo, context.pr_number, spec_result.message
+        )
         return
 
     filtered = filter_files(files, config.ignore)

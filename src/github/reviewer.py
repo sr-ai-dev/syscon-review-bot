@@ -124,3 +124,24 @@ async def submit_review(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
         json_data={"body": body, "event": "COMMENT"},
     )
+
+
+async def submit_spec_gate_review(
+    client: GitHubClient,
+    repo: str,
+    pr_number: int,
+    reason: str,
+) -> None:
+    body = "\n".join([
+        BOT_REVIEW_MARKER,
+        "",
+        "### 판정: 🚫 조건 불충분 — 리뷰 차단",
+        "",
+        f"> {reason}",
+        "",
+        "**spec 문서를 추가한 뒤 다시 push 해주세요.** 리뷰는 조건 충족 후 자동 실행됩니다.",
+    ])
+    await client.post(
+        f"/repos/{repo}/pulls/{pr_number}/reviews",
+        json_data={"body": body, "event": "COMMENT"},
+    )
