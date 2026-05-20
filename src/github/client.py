@@ -29,6 +29,20 @@ class GitHubClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_json_list(self, path: str, per_page: int = 100) -> list[dict]:
+        items: list[dict] = []
+        page = 1
+        while True:
+            sep = "&" if "?" in path else "?"
+            response = await self._http.get(f"{path}{sep}per_page={per_page}&page={page}")
+            response.raise_for_status()
+            batch = response.json()
+            items.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+        return items
+
     async def post(self, path: str, json_data: dict) -> dict:
         response = await self._http.post(path, json=json_data)
         response.raise_for_status()

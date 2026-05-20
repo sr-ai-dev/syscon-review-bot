@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
 from src.review.engine import review_pr, ReviewContext
 from src.models.review import Mismatch, ReviewResult, SpecStatus
 from src.models.config import ReviewConfig
@@ -56,6 +58,7 @@ def _mock_github(diff="diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x", **dispatch_kw
     m = AsyncMock()
     m.get.return_value = diff
     m.get_json.side_effect = make_get_json_dispatch(**dispatch_kwargs)
+    m.get_json_list = AsyncMock(return_value=[])
     m.post = AsyncMock(return_value={"id": 1})
     return m
 
@@ -542,3 +545,48 @@ async def test_expand_files_swallows_non_404_errors(context, aligned_result):
 
     # GPT 호출이 발생했음을 확인 (= 엔진이 크래시하지 않음)
     mock_gpt.review.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_review_pr_falls_back_to_files_api_on_406(context, aligned_result):
+    """get_pr_diff 406 → get_pr_files fallback으로 리뷰 계속 진행."""
+
+    async def raise_406(*args, **kwargs):
+        request = httpx.Request("GET", "https://api.github.com/repos/owner/repo/pulls/42")
+        response = httpx.Response(406, request=request)
+        raise httpx.HTTPStatusError("406 Not Acceptable", request=request, response=response)
+
+    pr_files = [
+        {"filename": "a.py", "patch": "@@ -1 +1 @@\n+new_code", "additions": 1, "deletions": 0, "status": "modified"},
+    ]
+
+    mock_github = _mock_github()
+    mock_github.get.side_effect = raise_406
+    mock_github.get_json_list.return_value = pr_files
+
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False)), _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    mock_github.get_json_list.assert_called_once()
+    mock_gpt.review.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_review_pr_reraises_non_406_http_error(context):
+    """get_pr_diff 500 등 비-406 에러는 fallback 없이 그대로 raise."""
+
+    async def raise_500(*args, **kwargs):
+        request = httpx.Request("GET", "https://api.github.com/repos/owner/repo/pulls/42")
+        response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError("500 Server Error", request=request, response=response)
+
+    mock_github = _mock_github()
+    mock_github.get.side_effect = raise_500
+    mock_gpt = AsyncMock()
+
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig()), _NO_EXPAND:
+        with pytest.raises(httpx.HTTPStatusError, match="500"):
+            await review_pr(context, mock_github, mock_gpt)
