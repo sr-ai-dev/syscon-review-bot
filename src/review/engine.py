@@ -133,6 +133,7 @@ async def review_pr(
         model=chosen_model,
         tool_executor=executor,
         max_tool_iterations=config.max_tool_iterations,
+        reasoning_effort=config.reasoning_effort,
     )
     result = postprocess(result, threshold=config.confidence_threshold)
     if config.enable_judge:
