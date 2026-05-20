@@ -45,6 +45,21 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
     return files
 
 
+def parse_pr_files(raw: list[dict]) -> list[FileDiff]:
+    files: list[FileDiff] = []
+    for item in raw:
+        patch = item.get("patch")
+        if not patch:
+            continue
+        files.append(FileDiff(
+            path=item["filename"],
+            patch=patch,
+            additions=item.get("additions", 0),
+            deletions=item.get("deletions", 0),
+        ))
+    return files
+
+
 def filter_files(files: list[FileDiff], ignore: IgnoreConfig) -> list[FileDiff]:
     result = []
     for f in files:

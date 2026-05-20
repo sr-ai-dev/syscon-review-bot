@@ -1,4 +1,4 @@
-from src.review.diff_parser import parse_diff, filter_files, FileDiff
+from src.review.diff_parser import parse_diff, parse_pr_files, filter_files, FileDiff
 from src.models.config import IgnoreConfig
 
 
@@ -59,3 +59,48 @@ class TestFilterFiles:
         files = parse_diff(SAMPLE_DIFF)
         filtered = filter_files(files, IgnoreConfig())
         assert len(filtered) == 2
+
+
+class TestParsePrFiles:
+    def test_converts_files_api_response(self):
+        raw = [
+            {
+                "filename": "src/api/users.py",
+                "patch": "@@ -10,6 +10,8 @@\n+    if user.is_deleted:\n+        raise HTTPException(status_code=410)",
+                "additions": 2,
+                "deletions": 0,
+                "status": "modified",
+            },
+            {
+                "filename": "requirements.lock",
+                "patch": "@@ -1,3 +1,4 @@\n+httpx==0.24.0",
+                "additions": 1,
+                "deletions": 0,
+                "status": "modified",
+            },
+        ]
+        files = parse_pr_files(raw)
+        assert len(files) == 2
+        assert files[0].path == "src/api/users.py"
+        assert files[0].additions == 2
+        assert "user.is_deleted" in files[0].patch
+
+    def test_skips_files_without_patch(self):
+        raw = [
+            {"filename": "big.bin", "patch": None, "additions": 0, "deletions": 0, "status": "modified"},
+            {"filename": "ok.py", "patch": "@@ -1 +1 @@\n+x", "additions": 1, "deletions": 0, "status": "modified"},
+        ]
+        files = parse_pr_files(raw)
+        assert len(files) == 1
+        assert files[0].path == "ok.py"
+
+    def test_empty_input(self):
+        assert parse_pr_files([]) == []
+
+    def test_removed_files_included(self):
+        raw = [
+            {"filename": "old.py", "patch": "@@ -1,5 +0,0 @@\n-line1\n-line2", "additions": 0, "deletions": 2, "status": "removed"},
+        ]
+        files = parse_pr_files(raw)
+        assert len(files) == 1
+        assert files[0].deletions == 2

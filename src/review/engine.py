@@ -2,9 +2,12 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
+import httpx
+
 from src.github.client import GitHubClient
 from src.github.pr import (
     get_pr_diff,
+    get_pr_files,
     get_pr_info,
     get_pr_reviews,
     get_pr_issue_comments,
@@ -14,7 +17,7 @@ from src.github.pr import (
 from src.github.reviewer import filter_bot_reviews, submit_review
 from src.models.config import ReviewConfig
 from src.review.decision import compute_decision
-from src.review.diff_parser import filter_files, parse_diff
+from src.review.diff_parser import filter_files, parse_diff, parse_pr_files
 from src.review.gpt_client import GPTClient
 from src.review.prompt_builder import build_system_prompt, build_user_prompt
 from src.review.config_loader import DEFAULT_CONFIG, load_config_from_yaml
@@ -66,8 +69,15 @@ async def review_pr(
         github_client, context.repo, pr_info["head"]["ref"], config_path
     )
 
-    diff_text = await get_pr_diff(github_client, context.repo, context.pr_number)
-    files = parse_diff(diff_text)
+    try:
+        diff_text = await get_pr_diff(github_client, context.repo, context.pr_number)
+        files = parse_diff(diff_text)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code != 406:
+            raise
+        logger.warning(f"Diff too large (406), falling back to files API for {context.repo}#{context.pr_number}")
+        raw_files = await get_pr_files(github_client, context.repo, context.pr_number)
+        files = parse_pr_files(raw_files)
     if not files:
         logger.info("Empty diff, skipping")
         return
