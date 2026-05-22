@@ -3,7 +3,7 @@ from src.models.review import Decision, FindingCategory, Mismatch, QualityFindin
 from src.review.decision import compute_decision
 
 
-BOT_REVIEW_MARKER = "## 🤖 스펙 정합성 리뷰"
+BOT_REVIEW_MARKER = "## 🤖 AI 리뷰"
 
 
 def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
@@ -27,9 +27,9 @@ def _format_location(item: Mismatch | QualityFinding) -> str:
 
 
 _VERDICT_LABEL = {
-    Decision.APPROVE: "✅ 스펙 부합 (Approve)",
-    Decision.REQUEST_CHANGES: "❌ 수정 필요 (Request Changes)",
-    Decision.COMMENT: "💬 Comment",
+    Decision.APPROVE: "✅ (Approved)",
+    Decision.REQUEST_CHANGES: "❌ (수정 필요)",
+    Decision.COMMENT: "💬 (Comment)",
 }
 
 

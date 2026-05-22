@@ -49,7 +49,7 @@ class TestFormatReviewBody:
 
     def test_aligned_shows_approve_verdict(self):
         body = format_review_body(_result_aligned())
-        assert "스펙 부합" in body or "Approve" in body
+        assert "Approved" in body
         assert "❌" not in body
 
     def test_mismatched_lists_each_with_location(self):
@@ -57,12 +57,12 @@ class TestFormatReviewBody:
         assert "로그아웃 엔드포인트 누락" in body
         assert "src/auth.py:10" in body
         assert "비밀번호 정책 검증 누락" in body
-        assert "Request Changes" in body
+        assert "수정 필요" in body
 
     def test_missing_spec_explains_requirement(self):
         body = format_review_body(_result_missing())
         assert "스펙" in body or "요구사항" in body
-        assert "Request Changes" in body
+        assert "수정 필요" in body
         # 스펙 없을 때 mismatch 섹션은 표시 안 함
         assert "src/" not in body
 
@@ -75,7 +75,7 @@ class TestFormatReviewBody:
         body = format_review_body(result)
         assert "아키텍처" in body
         assert "A 모듈이 B를 역참조" in body
-        assert "Request Changes" in body
+        assert "수정 필요" in body
 
     def test_architecture_section_always_shown(self):
         """검수 사실 노출용. 우려 없어도 '이상 없음' 표시."""
@@ -151,7 +151,7 @@ class TestFormatReviewBodyQuality:
         assert "중복 코드 블록" in body
         assert "버그" in body
         assert "코드 스멜" in body
-        assert "Request Changes" in body
+        assert "수정 필요" in body
 
     def test_quality_section_shows_ok_when_empty(self):
         body = format_review_body(_result_aligned())
@@ -263,9 +263,9 @@ class TestSubmitReview:
     async def test_always_comment_event(self):
         """GITHUB_TOKEN의 APPROVE 정책 회피: 결정 무관 항상 COMMENT 이벤트."""
         for result, label in [
-            (_result_aligned(), "Approve"),
-            (_result_mismatched(), "Request Changes"),
-            (_result_missing(), "Request Changes"),
+            (_result_aligned(), "Approved"),
+            (_result_mismatched(), "수정 필요"),
+            (_result_missing(), "수정 필요"),
         ]:
             client = AsyncMock()
             client.post = AsyncMock(return_value={"id": 1})
