@@ -81,7 +81,7 @@ async def test_review_pr_submits_when_present(context, aligned_result):
     mock_gpt.review.assert_called_once()
     mock_github.post.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "Approve" in payload["body"]
+    assert "Approved" in payload["body"]
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,7 @@ async def test_review_pr_request_changes_on_mismatches(context):
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "Request Changes" in payload["body"]
+    assert "수정 필요" in payload["body"]
 
 
 @pytest.mark.asyncio
@@ -117,7 +117,7 @@ async def test_review_pr_request_changes_on_missing_spec(context, missing_spec_r
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "Request Changes" in payload["body"]
+    assert "수정 필요" in payload["body"]
     assert "스펙" in payload["body"]
 
 
@@ -140,13 +140,13 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     bot_login = "github-actions[bot]"
     reviews = [
         {
-            "body": "## 🤖 스펙 정합성 리뷰\nFIRST_BOT_BODY",
+            "body": "## 🤖 AI 리뷰\nFIRST_BOT_BODY",
             "user": {"login": bot_login},
             "submitted_at": "2026-05-13T06:50:00Z",
             "commit_id": "abcdef0123456789",
         },
         {
-            "body": "## 🤖 스펙 정합성 리뷰\nSECOND_BOT_BODY",
+            "body": "## 🤖 AI 리뷰\nSECOND_BOT_BODY",
             "user": {"login": bot_login},
             "submitted_at": "2026-05-13T07:10:00Z",
             "commit_id": "fedcba9876543210",
@@ -209,7 +209,7 @@ async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_re
     bot_login = "github-actions[bot]"
     reviews = [
         {
-            "body": "## 🤖 스펙 정합성 리뷰\nbot review",
+            "body": "## 🤖 AI 리뷰\nbot review",
             "user": {"login": bot_login},
             "submitted_at": "2026-05-13T06:50:00Z",
             "commit_id": "abcdef01",
@@ -285,7 +285,7 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     bot_login = "github-actions[bot]"
     reviews = [
         {
-            "body": "## 🤖 스펙 정합성 리뷰\nlate bot review",
+            "body": "## 🤖 AI 리뷰\nlate bot review",
             "user": {"login": bot_login},
             "submitted_at": "2026-05-13T10:00:00Z",
             "commit_id": "feedface12345678",

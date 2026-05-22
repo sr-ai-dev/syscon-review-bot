@@ -157,7 +157,7 @@ class TestBuildUserPrompt:
             pr_title="t", pr_body="b",
             base_branch="main", head_branch="f",
             conversation_history=[
-                "[2026-05-13T06:50:47Z | 커밋 8f426f33 | 🤖 봇]\n## 🤖 스펙 정합성 리뷰\n이전 본문 내용",
+                "[2026-05-13T06:50:47Z | 커밋 8f426f33 | 🤖 봇]\n## 🤖 AI 리뷰\n이전 본문 내용",
                 "[2026-05-13T06:55:00Z | @alice (src/x.py:10)]\n이건 의도된 동작입니다",
             ],
         )
