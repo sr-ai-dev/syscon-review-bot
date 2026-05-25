@@ -1,33 +1,46 @@
-# Spec Gate Files API Design
+# Spec Gate Files API 설계
 
-## Approach
+## 접근 방식
 
-The review engine already fetches the PR diff for prompt construction. That diff remains the source for changed patches and review context.
+리뷰 엔진은 프롬프트 구성을 위해 기존처럼 PR diff를 가져온다. diff는 변경 patch와 리뷰 컨텍스트의 입력으로 계속 사용한다.
 
-For spec gate validation only, the engine uses the GitHub pull request files API and checks each item's `filename` value. GitHub returns decoded repository paths there, so non-ASCII spec paths are available in normal `spec/<feature>/...` form.
+spec gate 판정에 한해서는 GitHub PR files API의 `filename` 값을 사용한다. GitHub는 이 API에서 디코딩된 저장소 경로를 반환하므로, 한글 spec 경로도 정상적인 `spec/<기능명>/...` 형태로 확인할 수 있다.
 
-## Flow
+## 흐름
 
-1. Load PR metadata and repository review config.
-2. Fetch the raw PR diff and parse it into `FileDiff` objects.
-3. If the raw diff is too large and GitHub returns 406, fetch the PR files API and build `FileDiff` objects from that response.
-4. If `require_spec_files` is disabled, skip spec gate validation.
-5. If `require_spec_files` is enabled:
-   - reuse the PR files API response from the 406 fallback when present;
-   - otherwise fetch the PR files API;
-   - run `check_spec_files()` on the API `filename` values.
-6. If the gate fails, submit the existing spec gate review and stop.
-7. If the gate passes, continue with filtering, hunk expansion, prompt construction, and model review.
+1. PR 메타데이터와 저장소 리뷰 설정을 로드한다.
+2. raw PR diff를 가져와 `FileDiff` 목록으로 파싱한다.
+3. raw diff가 너무 커서 GitHub가 406을 반환하면 PR files API를 가져와 `FileDiff` 목록을 구성한다.
+4. `require_spec_files`가 꺼져 있으면 spec gate 검사를 건너뛴다.
+5. `require_spec_files`가 켜져 있으면 다음 순서로 검사한다.
+   - 406 fallback에서 이미 가져온 PR files API 응답이 있으면 재사용한다.
+   - 없으면 PR files API를 새로 가져온다.
+   - API의 `filename` 값으로 `check_spec_files()`를 실행한다.
+6. gate가 실패하면 기존 spec gate 리뷰를 남기고 종료한다.
+7. gate가 통과하면 필터링, hunk 확장, 프롬프트 구성, 모델 리뷰를 계속 진행한다.
 
-## Non-Goals
+## Spec 문서 규칙
 
-- Do not teach the raw diff parser to decode every quoted Git path format.
-- Do not alter spec gate rules.
-- Do not alter ignored file filtering.
-- Do not make extra GitHub API calls when spec gate validation is disabled.
+각 `spec/<기능명>/` 디렉터리는 다음 조합을 만족해야 한다.
 
-## Test Strategy
+- `tasks.md`는 필수다.
+- `requirements.md` 또는 `design.md` 중 1개 이상이 필요하다.
 
-- Keep existing spec gate block/pass tests.
-- Add a regression test where the raw diff contains escaped non-ASCII spec paths, while the files API contains decoded `spec/...` paths.
-- Verify the regression test reaches model review instead of submitting a spec gate block review.
+예시는 다음과 같다.
+
+- `requirements.md` + `tasks.md`: 통과
+- `design.md` + `tasks.md`: 통과
+- `requirements.md` + `design.md`: 실패
+- `tasks.md`만 있음: 실패
+
+## 비목표
+
+- raw diff 파서가 모든 quoted Git path 형식을 디코딩하도록 확장하지 않는다.
+- ignored file 필터링 정책은 변경하지 않는다.
+- spec gate가 꺼져 있을 때 추가 GitHub API 호출을 만들지 않는다.
+
+## 테스트 전략
+
+- 기존 spec gate 차단/통과 테스트를 새 문서 규칙에 맞게 유지한다.
+- raw diff에는 escaped 한글 spec 경로가 있고 files API에는 디코딩된 `spec/...` 경로가 있는 회귀 테스트를 추가한다.
+- 회귀 테스트가 spec gate 차단 리뷰를 제출하지 않고 모델 리뷰 단계까지 진행하는지 검증한다.

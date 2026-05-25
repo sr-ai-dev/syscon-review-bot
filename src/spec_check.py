@@ -1,7 +1,7 @@
 """PR spec documentation check.
 
 Every PR must include changes to at least one spec/<feature>/ directory,
-with 2+ of {requirements.md, design.md, tasks.md} modified.
+with tasks.md and at least one of {requirements.md, design.md} modified.
 """
 
 from __future__ import annotations
@@ -10,8 +10,9 @@ import re
 import sys
 from dataclasses import dataclass
 
-REQUIRED_FILES = ("requirements.md", "design.md", "tasks.md")
-MIN_REQUIRED = 2
+TASKS_FILE = "tasks.md"
+SUPPORTING_FILES = ("requirements.md", "design.md")
+SPEC_FILES = (*SUPPORTING_FILES, TASKS_FILE)
 SPEC_DIR_PATTERN = re.compile(r"^spec/([^/]+)/")
 
 
@@ -30,7 +31,7 @@ def check_spec_files(changed_files: list[str]) -> CheckResult:
             continue
         feature = m.group(1)
         filename = path.removeprefix(f"spec/{feature}/")
-        if filename in REQUIRED_FILES:
+        if filename in SPEC_FILES:
             spec_dirs.setdefault(feature, set()).add(filename)
 
     if not spec_dirs:
@@ -38,19 +39,21 @@ def check_spec_files(changed_files: list[str]) -> CheckResult:
             ok=False,
             message=(
                 "PR에 spec 문서 변경이 없습니다. "
-                f"모든 PR은 spec/<기능명>/ 아래 {', '.join(REQUIRED_FILES)} 중 "
-                f"{MIN_REQUIRED}개 이상을 포함해야 합니다."
+                f"모든 PR은 spec/<기능명>/ 아래 {TASKS_FILE}와 "
+                f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상을 포함해야 합니다."
             ),
         )
 
     errors = []
     for feature, files in sorted(spec_dirs.items()):
-        if len(files) < MIN_REQUIRED:
-            missing = [f for f in REQUIRED_FILES if f not in files]
-            errors.append(
-                f"  spec/{feature}/: {len(files)}/{MIN_REQUIRED} 파일 변경됨 "
-                f"(누락: {', '.join(missing)})"
-            )
+        missing = []
+        if TASKS_FILE not in files:
+            missing.append(TASKS_FILE)
+        if not any(f in files for f in SUPPORTING_FILES):
+            missing.append(f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개")
+        if missing:
+            present = ", ".join(sorted(files)) if files else "없음"
+            errors.append(f"  spec/{feature}/: 현재 {present} (누락: {', '.join(missing)})")
 
     if errors:
         return CheckResult(
@@ -58,8 +61,8 @@ def check_spec_files(changed_files: list[str]) -> CheckResult:
             message=(
                 "spec 문서 요건 미충족:\n"
                 + "\n".join(errors)
-                + f"\n\n각 spec/<기능명>/ 디렉토리에 {', '.join(REQUIRED_FILES)} 중 "
-                f"{MIN_REQUIRED}개 이상 변경이 필요합니다."
+                + f"\n\n각 spec/<기능명>/ 디렉토리에 {TASKS_FILE}와 "
+                f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상 변경이 필요합니다."
             ),
         )
 
