@@ -15,10 +15,20 @@ class TestCheckSpecFiles:
         result = check_spec_files([])
         assert not result.ok
 
-    def test_two_of_three_passes(self):
+    def test_tasks_and_requirements_passes(self):
         files = [
             "spec/login/requirements.md",
+            "spec/login/tasks.md",
+            "src/auth.py",
+        ]
+        result = check_spec_files(files)
+        assert result.ok
+        assert "login" in result.message
+
+    def test_tasks_and_design_passes(self):
+        files = [
             "spec/login/design.md",
+            "spec/login/tasks.md",
             "src/auth.py",
         ]
         result = check_spec_files(files)
@@ -42,12 +52,30 @@ class TestCheckSpecFiles:
         result = check_spec_files(files)
         assert not result.ok
         assert "spec/login/" in result.message
-        assert "1/2" in result.message
+        assert "tasks.md" in result.message
+
+    def test_requirements_and_design_without_tasks_fails(self):
+        files = [
+            "spec/login/requirements.md",
+            "spec/login/design.md",
+        ]
+        result = check_spec_files(files)
+        assert not result.ok
+        assert "spec/login/" in result.message
+        assert "tasks.md" in result.message
+
+    def test_only_tasks_file_fails(self):
+        files = [
+            "spec/login/tasks.md",
+        ]
+        result = check_spec_files(files)
+        assert not result.ok
+        assert "requirements.md 또는 design.md 중 1개" in result.message
 
     def test_multiple_features_all_pass(self):
         files = [
             "spec/login/requirements.md",
-            "spec/login/design.md",
+            "spec/login/tasks.md",
             "spec/payment/design.md",
             "spec/payment/tasks.md",
         ]
@@ -59,7 +87,7 @@ class TestCheckSpecFiles:
     def test_multiple_features_one_fails(self):
         files = [
             "spec/login/requirements.md",
-            "spec/login/design.md",
+            "spec/login/tasks.md",
             "spec/payment/tasks.md",
         ]
         result = check_spec_files(files)
@@ -78,7 +106,7 @@ class TestCheckSpecFiles:
     def test_nested_spec_paths_handled(self):
         files = [
             "spec/login/requirements.md",
-            "spec/login/design.md",
+            "spec/login/tasks.md",
             "spec/login/sub/extra.md",
         ]
         result = check_spec_files(files)

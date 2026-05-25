@@ -646,9 +646,9 @@ async def test_spec_gate_blocks_when_only_one_spec_file(context):
 
 
 @pytest.mark.asyncio
-async def test_spec_gate_passes_with_two_spec_files(context, aligned_result):
+async def test_spec_gate_passes_with_tasks_and_supporting_spec_file(context, aligned_result):
     mock_github = _mock_github_with_spec(
-        spec_files=["spec/login/requirements.md", "spec/login/design.md"],
+        spec_files=["spec/login/requirements.md", "spec/login/tasks.md"],
         code_files=["src/auth.py"],
     )
     mock_gpt = AsyncMock()
@@ -663,6 +663,26 @@ async def test_spec_gate_passes_with_two_spec_files(context, aligned_result):
     mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" not in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_blocks_without_tasks_file(context):
+    mock_github = _mock_github_with_spec(
+        spec_files=["spec/login/requirements.md", "spec/login/design.md"],
+        code_files=["src/auth.py"],
+    )
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_not_called()
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "조건 불충분" in payload["body"]
+    assert "tasks.md" in payload["body"]
 
 
 @pytest.mark.asyncio
