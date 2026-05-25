@@ -73,6 +73,7 @@ async def review_pr(
     try:
         diff_text = await get_pr_diff(github_client, context.repo, context.pr_number)
         files = parse_diff(diff_text)
+        raw_files = None
     except httpx.HTTPStatusError as e:
         if e.response.status_code != 406:
             raise
@@ -83,13 +84,16 @@ async def review_pr(
         logger.info("Empty diff, skipping")
         return
 
-    spec_result = check_spec_files([f.path for f in files])
-    if config.require_spec_files and not spec_result.ok:
-        logger.info(f"Spec gate failed: {spec_result.message}")
-        await submit_spec_gate_review(
-            github_client, context.repo, context.pr_number, spec_result.message
-        )
-        return
+    if config.require_spec_files:
+        if raw_files is None:
+            raw_files = await get_pr_files(github_client, context.repo, context.pr_number)
+        spec_result = check_spec_files([item["filename"] for item in raw_files])
+        if not spec_result.ok:
+            logger.info(f"Spec gate failed: {spec_result.message}")
+            await submit_spec_gate_review(
+                github_client, context.repo, context.pr_number, spec_result.message
+            )
+            return
 
     filtered = filter_files(files, config.ignore)
     if not filtered:
