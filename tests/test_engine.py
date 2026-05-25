@@ -58,7 +58,9 @@ def _mock_github(diff="diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x", **dispatch_kw
     m = AsyncMock()
     m.get.return_value = diff
     m.get_json.side_effect = make_get_json_dispatch(**dispatch_kwargs)
-    m.get_json_list = AsyncMock(return_value=[])
+    m.get_json_list = AsyncMock(return_value=[
+        {"filename": "a.py", "patch": "@@ -1 +1 @@\n+x", "additions": 1, "deletions": 0},
+    ])
     m.post = AsyncMock(return_value={"id": 1})
     return m
 
@@ -598,7 +600,13 @@ def _mock_github_with_spec(spec_files, code_files=None, **dispatch_kwargs):
     for f in (spec_files or []) + (code_files or []):
         parts.append(f"diff --git a/{f} b/{f}\n@@ -1 +1 @@\n+x")
     diff = "\n".join(parts)
-    return _mock_github(diff=diff, **dispatch_kwargs)
+    raw_files = [
+        {"filename": f, "patch": "@@ -1 +1 @@\n+x", "additions": 1, "deletions": 0}
+        for f in (spec_files or []) + (code_files or [])
+    ]
+    mock_github = _mock_github(diff=diff, **dispatch_kwargs)
+    mock_github.get_json_list.return_value = raw_files
+    return mock_github
 
 
 @pytest.mark.asyncio
@@ -643,6 +651,54 @@ async def test_spec_gate_passes_with_two_spec_files(context, aligned_result):
         spec_files=["spec/login/requirements.md", "spec/login/design.md"],
         code_files=["src/auth.py"],
     )
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
+    ), _NO_EXPAND:
+        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+
+    mock_gpt.review.assert_called_once()
+    payload = mock_github.post.call_args.kwargs["json_data"]
+    assert "조건 불충분" not in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_uses_files_api_for_escaped_diff_paths(context, aligned_result):
+    diff = "\n".join([
+        'diff --git "a/spec/260521-\\352\\270\\260\\353\\212\\245\\355\\206\\265\\355\\225\\251/requirements.md" "b/spec/260521-\\352\\270\\260\\353\\212\\245\\355\\206\\265\\355\\225\\251/requirements.md"',
+        "@@ -1 +1 @@",
+        "+requirements",
+        'diff --git "a/spec/260521-\\352\\270\\260\\353\\212\\245\\355\\206\\265\\355\\225\\251/tasks.md" "b/spec/260521-\\352\\270\\260\\353\\212\\245\\355\\206\\265\\355\\225\\251/tasks.md"',
+        "@@ -1 +1 @@",
+        "+tasks",
+        "diff --git a/src/auth.py b/src/auth.py",
+        "@@ -1 +1 @@",
+        "+x",
+    ])
+    mock_github = _mock_github(diff=diff)
+    mock_github.get_json_list.return_value = [
+        {
+            "filename": "spec/260521-기능통합/requirements.md",
+            "patch": "@@ -1 +1 @@\n+requirements",
+            "additions": 1,
+            "deletions": 0,
+        },
+        {
+            "filename": "spec/260521-기능통합/tasks.md",
+            "patch": "@@ -1 +1 @@\n+tasks",
+            "additions": 1,
+            "deletions": 0,
+        },
+        {
+            "filename": "src/auth.py",
+            "patch": "@@ -1 +1 @@\n+x",
+            "additions": 1,
+            "deletions": 0,
+        },
+    ]
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = aligned_result
 
