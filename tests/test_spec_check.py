@@ -10,6 +10,8 @@ class TestCheckSpecFiles:
         result = check_spec_files(["src/main.py", "README.md"])
         assert not result.ok
         assert "spec 문서 변경이 없습니다" in result.message
+        assert "tasks.md가 반드시" in result.message
+        assert "requirements.md 또는 design.md 중 1개 이상" in result.message
 
     def test_empty_file_list_fails(self):
         result = check_spec_files([])
@@ -71,6 +73,7 @@ class TestCheckSpecFiles:
         result = check_spec_files(files)
         assert not result.ok
         assert "requirements.md 또는 design.md 중 1개" in result.message
+        assert "tasks.md가 반드시" in result.message
 
     def test_multiple_features_all_pass(self):
         files = [

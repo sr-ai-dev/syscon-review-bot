@@ -14,6 +14,10 @@ TASKS_FILE = "tasks.md"
 SUPPORTING_FILES = ("requirements.md", "design.md")
 SPEC_FILES = (*SUPPORTING_FILES, TASKS_FILE)
 SPEC_DIR_PATTERN = re.compile(r"^spec/([^/]+)/")
+REQUIREMENT_MESSAGE = (
+    f"{TASKS_FILE}가 반드시 있어야 하며, "
+    f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상도 함께 있어야 합니다."
+)
 
 
 @dataclass
@@ -39,8 +43,7 @@ def check_spec_files(changed_files: list[str]) -> CheckResult:
             ok=False,
             message=(
                 "PR에 spec 문서 변경이 없습니다. "
-                f"모든 PR은 spec/<기능명>/ 아래 {TASKS_FILE}와 "
-                f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상을 포함해야 합니다."
+                f"모든 PR은 spec/<기능명>/ 아래 {REQUIREMENT_MESSAGE}"
             ),
         )
 
@@ -61,8 +64,7 @@ def check_spec_files(changed_files: list[str]) -> CheckResult:
             message=(
                 "spec 문서 요건 미충족:\n"
                 + "\n".join(errors)
-                + f"\n\n각 spec/<기능명>/ 디렉토리에 {TASKS_FILE}와 "
-                f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상 변경이 필요합니다."
+                + f"\n\n각 spec/<기능명>/ 디렉토리에 {REQUIREMENT_MESSAGE}"
             ),
         )
 
