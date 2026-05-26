@@ -183,11 +183,11 @@ class TestFormatReviewBodyPriorResolved:
         body = format_review_body(_result_aligned())
         assert "이전 리뷰 상태" not in body
 
-    def test_full_resolved_item_uses_strikethrough(self):
+    def test_full_resolved_item_uses_check_prefix(self):
         body = format_review_body(_result_with_prior_resolved())
-        # 완전 해결 항목은 strikethrough (~~)
         line = next(l for l in body.split("\n") if "필드 초기값" in l)
-        assert "~~" in line
+        assert "✅ 완전 해결:" in line
+        assert "~~" not in line
 
     def test_partial_resolved_item_no_strikethrough(self):
         result = ReviewResult(

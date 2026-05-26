@@ -18,7 +18,7 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
 4. 최종 output 구성:
    - mismatches/quality_findings/architecture_concern: 미해결 + 부분해결의 남은 문제 + 신규
    - prior_resolved: 완전 해결 + 작성자 반박 수용 + 부분 해결(`(부분)` prefix 필수)
-5. **prefix 규칙은 엄격하다.** 완전 해결 항목에 `(부분)` 붙이면 안 되고, 부분 해결 항목에 prefix 빼면 안 된다. 사용자가 strikethrough 여부로 상태를 판별한다.
+5. **prefix 규칙은 엄격하다.** 완전 해결 항목에 `(부분)` 붙이면 안 되고, 부분 해결 항목에 prefix 빼면 안 된다. 사용자는 리뷰 본문의 체크 표시와 부분 해결 표시로 상태를 판별한다.
 
 이전 봇 리뷰가 없으면(첫 리뷰) 이 절차를 건너뛰고 검토 순서로 바로 진행한다.
 

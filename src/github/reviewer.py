@@ -59,7 +59,7 @@ def format_review_body(result: ReviewResult) -> str:
             f"### 이전 리뷰 상태 ({', '.join(header_parts)})",
         ])
         for item in fulls:
-            lines.append(f"- ~~{_escape_table_cell(item)}~~")
+            lines.append(f"- ✅ 완전 해결: {_escape_table_cell(item)}")
         for item in partials:
             stripped = item.lstrip()
             stripped = stripped[len("(부분)"):].lstrip()
