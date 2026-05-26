@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.review.engine import review_pr, ReviewContext
-from src.models.review import Mismatch, ReviewResult, SpecStatus
+from src.models.review import ArchitectureFinding, Mismatch, ReviewResult, SpecStatus
 from src.models.config import ReviewConfig
 
 
@@ -406,12 +406,13 @@ async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligne
 async def test_review_pr_runs_judge_when_enabled(context):
     first = ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=False, summary="원본",
-        prior_resolved=["X → 일부"], architecture_concern="X 잔존",
+        prior_resolved=["X → 일부"],
+        architecture_findings=[ArchitectureFinding(description="X 잔존", suggestion="s")],
     )
     judged = ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=False, summary="judged",
         prior_resolved=["(부분) X → 일부, 잔존은 아키텍처 참조"],
-        architecture_concern="X 잔존",
+        architecture_findings=[ArchitectureFinding(description="X 잔존", suggestion="s")],
     )
     call_count = {"n": 0}
     async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):

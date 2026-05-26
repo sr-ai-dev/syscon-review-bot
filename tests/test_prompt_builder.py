@@ -35,10 +35,10 @@ class TestBuildSystemPrompt:
             assert field in prompt
 
     def test_includes_brief_architecture_check(self):
-        """스펙 정합성이 주이지만 명백한 아키텍처 문제는 별도 한 줄로 보고."""
+        """스펙 정합성이 주이지만 명백한 아키텍처 문제는 별도 finding으로 보고."""
         prompt = build_system_prompt()
         assert "아키텍처" in prompt
-        assert "architecture_concern" in prompt
+        assert "architecture_findings" in prompt
 
     def test_includes_quality_findings_schema(self):
         prompt = build_system_prompt()

@@ -8,6 +8,7 @@ from src.github.reviewer import (
     submit_review,
 )
 from src.models.review import (
+    ArchitectureFinding,
     Decision,
     FindingCategory,
     Mismatch,
@@ -55,7 +56,9 @@ class TestFormatReviewBody:
     def test_mismatched_lists_each_with_location(self):
         body = format_review_body(_result_mismatched())
         assert "로그아웃 엔드포인트 누락" in body
-        assert "src/auth.py:10" in body
+        assert "위치: `src/auth.py:10`" in body
+        assert "| # | 항목 | conf | 제안 |" in body
+        assert "| # | 항목 | 위치 | conf | 제안 |" not in body
         assert "비밀번호 정책 검증 누락" in body
         assert "수정 필요" in body
 
@@ -66,15 +69,25 @@ class TestFormatReviewBody:
         # 스펙 없을 때 mismatch 섹션은 표시 안 함
         assert "src/" not in body
 
-    def test_renders_architecture_concern_when_present(self):
+    def test_renders_architecture_findings_when_present(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True,
             summary="스펙 부합",
-            architecture_concern="A 모듈이 B를 역참조하는 의심 코드 있음",
+            architecture_findings=[
+                ArchitectureFinding(
+                    file="src/a.py", line=20,
+                    description="A 모듈이 B를 역참조하는 의심 코드 있음",
+                    suggestion="의존 방향을 단방향으로 정리",
+                    confidence=85,
+                ),
+            ],
         )
         body = format_review_body(result)
         assert "아키텍처" in body
         assert "A 모듈이 B를 역참조" in body
+        assert "| # | 항목 | conf | 제안 |" in body
+        assert "위치: `src/a.py:20`" in body
+        assert "conf 85" in body
         assert "수정 필요" in body
 
     def test_architecture_section_always_shown(self):
@@ -147,7 +160,9 @@ class TestFormatReviewBodyQuality:
         body = format_review_body(_result_with_quality_findings())
         assert "코드 품질" in body
         assert "None 가능 값을 검사 없이 사용" in body
-        assert "src/svc.py:12" in body
+        assert "위치: `src/svc.py:12`" in body
+        assert "| # | 분류 | 항목 | conf | 제안 |" in body
+        assert "| # | 분류 | 항목 | 위치 | conf | 제안 |" not in body
         assert "중복 코드 블록" in body
         assert "버그" in body
         assert "코드 스멜" in body
@@ -183,11 +198,11 @@ class TestFormatReviewBodyPriorResolved:
         body = format_review_body(_result_aligned())
         assert "이전 리뷰 상태" not in body
 
-    def test_full_resolved_item_uses_strikethrough(self):
+    def test_full_resolved_item_uses_check_prefix(self):
         body = format_review_body(_result_with_prior_resolved())
-        # 완전 해결 항목은 strikethrough (~~)
         line = next(l for l in body.split("\n") if "필드 초기값" in l)
-        assert "~~" in line
+        assert "✅ 완전 해결:" in line
+        assert "~~" not in line
 
     def test_partial_resolved_item_no_strikethrough(self):
         result = ReviewResult(

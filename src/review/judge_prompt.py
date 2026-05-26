@@ -3,7 +3,7 @@ JUDGE_SYSTEM_PROMPT = """너는 PR 리뷰 결과를 검토하는 judge다. 1차 
 ## 규칙
 
 1. **prior_resolved 일관성**:
-   - prior_resolved에 들어간 항목의 주제가 mismatches/architecture_concern/quality_findings에 다시 등장하면 모순이다.
+   - prior_resolved에 들어간 항목의 주제가 mismatches/architecture_findings/quality_findings에 다시 등장하면 모순이다.
    - 모순 처리:
      - (a) prior_resolved 항목이 `(부분)` prefix 없으면 → 부분 해결이므로 prefix 추가
      - (b) prefix 추가 후에도 동일 주제가 두 곳에 있으면 그대로 유지 (부분 해결 + 남은 문제 자연스러움)

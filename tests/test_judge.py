@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from src.review.judge import run_judge
-from src.models.review import ReviewResult, SpecStatus
+from src.models.review import ArchitectureFinding, ReviewResult, SpecStatus
 
 
 @pytest.fixture
@@ -10,7 +10,9 @@ def contradictory_result():
     return ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=False, summary="모순 있음",
         prior_resolved=["그룹 패널 책임 → 일부 분리됨"],
-        architecture_concern="그룹 패널이 멤버 수집·집계 직접 담당",
+        architecture_findings=[
+            ArchitectureFinding(description="그룹 패널이 멤버 수집·집계 직접 담당", suggestion="s"),
+        ],
     )
 
 
@@ -18,8 +20,10 @@ def contradictory_result():
 def judge_fixed_result():
     return ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=False, summary="부분 해결 + 잔존 책임",
-        prior_resolved=["(부분) 그룹 패널 책임 → 일부 분리됨, 남은 문제는 architecture_concern 참조"],
-        architecture_concern="그룹 패널이 멤버 수집·집계 직접 담당",
+        prior_resolved=["(부분) 그룹 패널 책임 → 일부 분리됨, 남은 문제는 architecture_findings 참조"],
+        architecture_findings=[
+            ArchitectureFinding(description="그룹 패널이 멤버 수집·집계 직접 담당", suggestion="s"),
+        ],
     )
 
 

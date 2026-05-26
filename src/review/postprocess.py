@@ -83,6 +83,11 @@ def postprocess(result: ReviewResult, threshold: int = 70) -> ReviewResult:
             (key := _location_key(q)) is None or key not in mismatch_locations
         )
     ]
+    arch_threshold = max(threshold, 80)
+    kept_architecture = [
+        a for a in result.architecture_findings
+        if a.confidence >= arch_threshold
+    ]
 
     new_aligned = result.aligned
     if result.spec_status == SpecStatus.PRESENT:
@@ -90,13 +95,13 @@ def postprocess(result: ReviewResult, threshold: int = 70) -> ReviewResult:
 
     finding_texts = [m.description for m in kept_mismatches]
     finding_texts += [q.description for q in kept_quality]
-    if result.architecture_concern:
-        finding_texts.append(result.architecture_concern)
+    finding_texts += [a.description for a in kept_architecture]
 
     new_prior_resolved = _enforce_partial_prefix(result.prior_resolved, finding_texts)
 
     return result.model_copy(update={
         "mismatches": kept_mismatches,
+        "architecture_findings": kept_architecture,
         "quality_findings": kept_quality,
         "aligned": new_aligned,
         "prior_resolved": new_prior_resolved,
