@@ -43,6 +43,16 @@ class QualityFinding(BaseModel):
     confidence: int = Field(default=70, ge=0, le=100)
 
 
+class ArchitectureFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file: str | None = None
+    line: int | None = None
+    description: str
+    suggestion: str
+    confidence: int = Field(default=80, ge=0, le=100)
+
+
 class ReviewResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,6 +60,6 @@ class ReviewResult(BaseModel):
     aligned: bool = False
     summary: str
     mismatches: list[Mismatch] = Field(default_factory=list)
-    architecture_concern: str = ""
+    architecture_findings: list[ArchitectureFinding] = Field(default_factory=list)
     quality_findings: list[QualityFinding] = Field(default_factory=list)
     prior_resolved: list[str] = Field(default_factory=list)

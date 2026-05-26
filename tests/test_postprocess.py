@@ -1,7 +1,7 @@
 import pytest
 
 from src.models.review import (
-    FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus,
+    ArchitectureFinding, FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus,
 )
 from src.review.postprocess import postprocess
 
@@ -10,6 +10,10 @@ def _result(**kw):
     base = dict(spec_status=SpecStatus.PRESENT, aligned=True, summary="s")
     base.update(kw)
     return ReviewResult(**base)
+
+
+def _arch(description: str, confidence: int = 85) -> ArchitectureFinding:
+    return ArchitectureFinding(description=description, suggestion="s", confidence=confidence)
 
 
 def test_filters_low_confidence_mismatches():
@@ -87,16 +91,21 @@ def test_aligned_recomputed_when_all_mismatches_filtered_out():
     assert out.aligned is True
 
 
-def test_arch_concern_string_preserved():
-    r = _result(architecture_concern="단순 framework wiring")
+def test_filters_low_confidence_architecture_findings():
+    r = _result(architecture_findings=[
+        _arch("확실한 레이어 역참조", confidence=85),
+        _arch("약한 구조 의심", confidence=70),
+    ])
     out = postprocess(r, threshold=70)
-    assert out.architecture_concern == "단순 framework wiring"
+    assert [a.description for a in out.architecture_findings] == ["확실한 레이어 역참조"]
 
 
 def test_prior_resolved_gets_partial_prefix_when_topic_still_in_findings():
     r = _result(
         prior_resolved=["그룹 패널 책임 → helper 분리로 일부 완화"],
-        architecture_concern="그룹 패널이 책임 분산 없이 멤버 수집·집계·Command 실행 직접 담당",
+        architecture_findings=[
+            _arch("그룹 패널이 책임 분산 없이 멤버 수집·집계·Command 실행 직접 담당"),
+        ],
     )
     out = postprocess(r, threshold=70)
     assert out.prior_resolved[0].startswith("(부분)")
@@ -105,7 +114,7 @@ def test_prior_resolved_gets_partial_prefix_when_topic_still_in_findings():
 def test_prior_resolved_keeps_full_when_topic_not_in_findings():
     r = _result(
         prior_resolved=["필드 초기값 → 생성자에서 보정"],
-        architecture_concern="다른 주제",
+        architecture_findings=[_arch("다른 주제")],
     )
     out = postprocess(r, threshold=70)
     assert not out.prior_resolved[0].startswith("(부분)")
@@ -114,7 +123,7 @@ def test_prior_resolved_keeps_full_when_topic_not_in_findings():
 def test_prior_resolved_partial_prefix_already_present_kept():
     r = _result(
         prior_resolved=["(부분) 그룹 패널 책임 → 일부 완화"],
-        architecture_concern="그룹 패널 책임 잔존",
+        architecture_findings=[_arch("그룹 패널 책임 잔존")],
     )
     out = postprocess(r, threshold=70)
     assert out.prior_resolved[0].count("(부분)") == 1
@@ -140,7 +149,7 @@ def test_prior_resolved_keeps_full_when_only_common_words_overlap():
     """일반 어휘 ("처리", "에러", "함수") 2개 겹쳐도 prefix 부착 금지."""
     r = _result(
         prior_resolved=["로그 처리 에러 핸들링 → 수정 완료"],
-        architecture_concern="요청 처리 시 에러 발생 가능",
+        architecture_findings=[_arch("요청 처리 시 에러 발생 가능")],
     )
     out = postprocess(r, threshold=70)
     # 일반 어휘만 겹침 → 다른 주제로 간주 → prefix 없어야
@@ -151,7 +160,7 @@ def test_prior_resolved_keeps_full_when_only_two_meaningful_tokens_overlap():
     """의미 토큰 2개만 겹치면 prefix 부착 안 함 (>=3 임계)."""
     r = _result(
         prior_resolved=["LocationPort 기본값 보정 → 완료"],
-        architecture_concern="LocationPort 생성자에서 기본값 적용",
+        architecture_findings=[_arch("LocationPort 생성자에서 기본값 적용")],
     )
     out = postprocess(r, threshold=70)
     # "LocationPort", "기본값" 2개 매칭 — but 임계 3 미만 → 부착 안 함
@@ -162,7 +171,7 @@ def test_prior_resolved_adds_partial_when_three_or_more_tokens_overlap():
     """3개 이상 매칭이면 부착."""
     r = _result(
         prior_resolved=["그룹 패널의 멤버 수집 책임 → 분리 완료"],
-        architecture_concern="그룹 패널이 멤버 location 수집 책임 직접 담당",
+        architecture_findings=[_arch("그룹 패널이 멤버 location 수집 책임 직접 담당")],
     )
     out = postprocess(r, threshold=70)
     # "그룹", "패널", "멤버", "수집", "책임" 등 충분히 매칭
@@ -215,7 +224,7 @@ def test_prior_resolved_no_prefix_when_overlap_exactly_one():
     """1개 토큰만 일치하면 부착 안 함 (>=3 임계)."""
     r = _result(
         prior_resolved=["그룹 멤버 책임 분리 → 완료"],
-        architecture_concern="완전 다른 주제의 데이터 흐름 문제",
+        architecture_findings=[_arch("완전 다른 주제의 데이터 흐름 문제")],
     )
     out = postprocess(r, threshold=70)
     assert not out.prior_resolved[0].startswith("(부분)")

@@ -8,6 +8,7 @@ from src.github.reviewer import (
     submit_review,
 )
 from src.models.review import (
+    ArchitectureFinding,
     Decision,
     FindingCategory,
     Mismatch,
@@ -68,15 +69,25 @@ class TestFormatReviewBody:
         # 스펙 없을 때 mismatch 섹션은 표시 안 함
         assert "src/" not in body
 
-    def test_renders_architecture_concern_when_present(self):
+    def test_renders_architecture_findings_when_present(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True,
             summary="스펙 부합",
-            architecture_concern="A 모듈이 B를 역참조하는 의심 코드 있음",
+            architecture_findings=[
+                ArchitectureFinding(
+                    file="src/a.py", line=20,
+                    description="A 모듈이 B를 역참조하는 의심 코드 있음",
+                    suggestion="의존 방향을 단방향으로 정리",
+                    confidence=85,
+                ),
+            ],
         )
         body = format_review_body(result)
         assert "아키텍처" in body
         assert "A 모듈이 B를 역참조" in body
+        assert "| # | 항목 | conf | 제안 |" in body
+        assert "위치: `src/a.py:20`" in body
+        assert "conf 85" in body
         assert "수정 필요" in body
 
     def test_architecture_section_always_shown(self):

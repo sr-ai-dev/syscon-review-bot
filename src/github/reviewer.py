@@ -1,5 +1,5 @@
 from src.github.client import GitHubClient
-from src.models.review import Decision, FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus
+from src.models.review import ArchitectureFinding, Decision, FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus
 from src.review.decision import compute_decision
 
 
@@ -17,7 +17,7 @@ def _escape_table_cell(text: str | None) -> str:
     return " ".join(text.split())
 
 
-def _format_location(item: Mismatch | QualityFinding) -> str:
+def _format_location(item: ArchitectureFinding | Mismatch | QualityFinding) -> str:
     if item.file is None:
         return "_전체 PR_"
     safe = _escape_table_cell(item.file)
@@ -91,8 +91,15 @@ def format_review_body(result: ReviewResult) -> str:
 
     lines.append("")
     lines.append("### 아키텍처 검토")
-    if result.architecture_concern:
-        lines.append(f"> {result.architecture_concern}")
+    if result.architecture_findings:
+        lines.append("| # | 항목 | conf | 제안 |")
+        lines.append("|---|------|------|------|")
+        for idx, a in enumerate(result.architecture_findings, 1):
+            desc = _escape_table_cell(a.description)
+            sugg = _escape_table_cell(a.suggestion)
+            loc = _format_location(a)
+            item = _format_item_with_location(desc, loc)
+            lines.append(f"| {idx} | {item} | conf {a.confidence} | {sugg} |")
     else:
         lines.append("> 이상 없음")
 

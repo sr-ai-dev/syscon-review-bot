@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.review import (
+    ArchitectureFinding,
     Mismatch,
     ReviewResult,
     SpecStatus,
@@ -67,18 +68,45 @@ class TestReviewResult:
         result = ReviewResult(spec_status=SpecStatus.MISSING, summary="x")
         assert result.aligned is False
 
-    def test_architecture_concern_field_accepted(self):
+    def test_architecture_findings_field_accepted(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
-            architecture_concern="레이어 역참조 의심: A가 B를 직접 import",
+            architecture_findings=[
+                ArchitectureFinding(
+                    file="a.py", line=1,
+                    description="레이어 역참조 의심: A가 B를 직접 import",
+                    suggestion="의존 방향을 정리",
+                    confidence=85,
+                ),
+            ],
         )
-        assert "레이어 역참조" in result.architecture_concern
+        assert "레이어 역참조" in result.architecture_findings[0].description
 
-    def test_architecture_concern_defaults_empty(self):
+    def test_architecture_findings_default_empty(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
         )
-        assert result.architecture_concern == ""
+        assert result.architecture_findings == []
+
+
+class TestArchitectureFinding:
+    def test_create_with_location_and_confidence(self):
+        f = ArchitectureFinding(
+            file="src/api.py", line=12,
+            description="Controller가 repository를 직접 참조",
+            suggestion="service 계층을 통해 접근",
+            confidence=88,
+        )
+        assert f.file == "src/api.py"
+        assert f.confidence == 88
+
+    def test_confidence_defaults_to_80(self):
+        f = ArchitectureFinding(description="d", suggestion="s")
+        assert f.confidence == 80
+
+    def test_confidence_must_be_in_range(self):
+        with pytest.raises(ValidationError):
+            ArchitectureFinding(description="d", suggestion="s", confidence=101)
 
     def test_old_fields_removed(self):
         """score, decision, issues, good_points, score_rationale은 더 이상 존재하지 않음."""

@@ -9,7 +9,7 @@ def compute_decision(result: ReviewResult) -> Decision:
         return Decision.REQUEST_CHANGES
     if not result.aligned:
         return Decision.REQUEST_CHANGES
-    if result.architecture_concern:
+    if result.architecture_findings:
         return Decision.REQUEST_CHANGES
     if any(f.category in _BLOCKING_CATEGORIES for f in result.quality_findings):
         return Decision.REQUEST_CHANGES
