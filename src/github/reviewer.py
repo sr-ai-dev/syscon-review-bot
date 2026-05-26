@@ -26,6 +26,10 @@ def _format_location(item: Mismatch | QualityFinding) -> str:
     return f"`{safe}`"
 
 
+def _format_item_with_location(description: str, location: str) -> str:
+    return f"{description}<br>위치: {location}"
+
+
 _VERDICT_LABEL = {
     Decision.APPROVE: "✅ (Approved)",
     Decision.REQUEST_CHANGES: "❌ (수정 필요)",
@@ -75,14 +79,15 @@ def format_review_body(result: ReviewResult) -> str:
         lines.extend([
             "",
             "### 스펙과 불일치",
-            "| # | 항목 | 위치 | conf | 제안 |",
-            "|---|------|------|------|------|",
+            "| # | 항목 | conf | 제안 |",
+            "|---|------|------|------|",
         ])
         for idx, m in enumerate(result.mismatches, 1):
             desc = _escape_table_cell(m.description)
             sugg = _escape_table_cell(m.suggestion)
             loc = _format_location(m)
-            lines.append(f"| {idx} | {desc} | {loc} | conf {m.confidence} | {sugg} |")
+            item = _format_item_with_location(desc, loc)
+            lines.append(f"| {idx} | {item} | conf {m.confidence} | {sugg} |")
 
     lines.append("")
     lines.append("### 아키텍처 검토")
@@ -94,14 +99,15 @@ def format_review_body(result: ReviewResult) -> str:
     lines.append("")
     lines.append("### 코드 품질 검사")
     if result.quality_findings:
-        lines.append("| # | 분류 | 항목 | 위치 | conf | 제안 |")
-        lines.append("|---|------|------|------|------|------|")
+        lines.append("| # | 분류 | 항목 | conf | 제안 |")
+        lines.append("|---|------|------|------|------|")
         for idx, f in enumerate(result.quality_findings, 1):
             cat = _CATEGORY_LABEL[f.category]
             desc = _escape_table_cell(f.description)
             sugg = _escape_table_cell(f.suggestion)
             loc = _format_location(f)
-            lines.append(f"| {idx} | {cat} | {desc} | {loc} | conf {f.confidence} | {sugg} |")
+            item = _format_item_with_location(desc, loc)
+            lines.append(f"| {idx} | {cat} | {item} | conf {f.confidence} | {sugg} |")
     else:
         lines.append("> 이상 없음")
 

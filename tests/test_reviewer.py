@@ -55,7 +55,9 @@ class TestFormatReviewBody:
     def test_mismatched_lists_each_with_location(self):
         body = format_review_body(_result_mismatched())
         assert "로그아웃 엔드포인트 누락" in body
-        assert "src/auth.py:10" in body
+        assert "위치: `src/auth.py:10`" in body
+        assert "| # | 항목 | conf | 제안 |" in body
+        assert "| # | 항목 | 위치 | conf | 제안 |" not in body
         assert "비밀번호 정책 검증 누락" in body
         assert "수정 필요" in body
 
@@ -147,7 +149,9 @@ class TestFormatReviewBodyQuality:
         body = format_review_body(_result_with_quality_findings())
         assert "코드 품질" in body
         assert "None 가능 값을 검사 없이 사용" in body
-        assert "src/svc.py:12" in body
+        assert "위치: `src/svc.py:12`" in body
+        assert "| # | 분류 | 항목 | conf | 제안 |" in body
+        assert "| # | 분류 | 항목 | 위치 | conf | 제안 |" not in body
         assert "중복 코드 블록" in body
         assert "버그" in body
         assert "코드 스멜" in body
