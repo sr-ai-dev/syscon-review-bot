@@ -16,6 +16,7 @@ from src.github.pr import (
 )
 from src.github.reviewer import filter_bot_reviews, submit_review, submit_spec_gate_review
 from src.models.config import ReviewConfig
+from src.models.review import Decision
 from src.review.decision import compute_decision
 from src.review.diff_parser import filter_files, parse_diff, parse_pr_files
 from src.review.gpt_client import GPTClient
@@ -62,7 +63,7 @@ async def review_pr(
     config_path: str = ".github/review-bot.yml",
     model_override: str | None = None,
     dry_run: bool = False,
-) -> None:
+) -> Decision:
     logger.info(f"Reviewing {context.repo}#{context.pr_number}")
 
     pr_info = await get_pr_info(github_client, context.repo, context.pr_number)
@@ -82,7 +83,7 @@ async def review_pr(
         files = parse_pr_files(raw_files)
     if not files:
         logger.info("Empty diff, skipping")
-        return
+        return Decision.APPROVE
 
     if config.require_spec_files:
         if raw_files is None:
@@ -93,12 +94,12 @@ async def review_pr(
             await submit_spec_gate_review(
                 github_client, context.repo, context.pr_number, spec_result.message
             )
-            return
+            return Decision.REQUEST_CHANGES
 
     filtered = filter_files(files, config.ignore)
     if not filtered:
         logger.info("All files filtered out")
-        return
+        return Decision.APPROVE
 
     head_sha = pr_info["head"]["sha"]
     filtered = await _expand_files(
@@ -142,7 +143,7 @@ async def review_pr(
         print("===== USER PROMPT =====")
         print(user_prompt)
         logger.info("Dry run complete (GPT/submit skipped)")
-        return
+        return Decision.APPROVE
 
     chosen_model = model_override or config.model
 
@@ -169,6 +170,7 @@ async def review_pr(
         f"spec_status={result.spec_status.value}, aligned={result.aligned}, "
         f"decision={decision.value}"
     )
+    return decision
 
 
 async def _fetch_and_expand(github_client, repo, head_sha, f, max_lines):

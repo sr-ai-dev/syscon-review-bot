@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.review.engine import review_pr, ReviewContext
-from src.models.review import ArchitectureFinding, Mismatch, ReviewResult, SpecStatus
+from src.models.review import ArchitectureFinding, Decision, Mismatch, ReviewResult, SpecStatus
 from src.models.config import ReviewConfig
 
 
@@ -78,12 +78,13 @@ async def test_review_pr_submits_when_present(context, aligned_result):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(enable_judge=False, require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     mock_gpt.review.assert_called_once()
     mock_github.post.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "Approved" in payload["body"]
+    assert decision == Decision.APPROVE
 
 
 @pytest.mark.asyncio
@@ -100,10 +101,11 @@ async def test_review_pr_request_changes_on_mismatches(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "수정 필요" in payload["body"]
+    assert decision == Decision.REQUEST_CHANGES
 
 
 @pytest.mark.asyncio
@@ -116,11 +118,12 @@ async def test_review_pr_request_changes_on_missing_spec(context, missing_spec_r
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "수정 필요" in payload["body"]
     assert "스펙" in payload["body"]
+    assert decision == Decision.REQUEST_CHANGES
 
 
 @pytest.mark.asyncio
@@ -132,9 +135,10 @@ async def test_review_pr_skips_empty_diff(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     mock_gpt.review.assert_not_called()
+    assert decision == Decision.APPROVE
 
 
 @pytest.mark.asyncio
