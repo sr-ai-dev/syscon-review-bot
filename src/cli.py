@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from src.github.client import GitHubClient
+from src.models.review import Decision
 from src.review.engine import ReviewContext, review_pr
 from src.review.gpt_client import GPTClient
 
@@ -60,7 +61,7 @@ async def main() -> int:
         gpt_client = GPTClient(api_key=openai_key)
 
     try:
-        await review_pr(
+        decision = await review_pr(
             context=ReviewContext(repo=repo, pr_number=pr_number),
             github_client=github_client,
             gpt_client=gpt_client,
@@ -68,7 +69,7 @@ async def main() -> int:
             model_override=model_override,
             dry_run=dry_run,
         )
-        return 0
+        return 0 if decision == Decision.APPROVE else 1
     except Exception:
         logger.exception(f"Review failed for {repo}#{pr_number}")
         return 1

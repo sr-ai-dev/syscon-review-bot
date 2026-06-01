@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from src.cli import main
+from src.models.review import Decision
 
 
 class TestCli:
@@ -38,6 +39,7 @@ class TestCli:
         monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = Decision.APPROVE
             exit_code = await main()
 
         assert exit_code == 0
@@ -45,6 +47,20 @@ class TestCli:
         kwargs = mock_review.call_args.kwargs
         assert kwargs["context"].repo == "owner/repo"
         assert kwargs["context"].pr_number == 5
+
+    @pytest.mark.asyncio
+    async def test_pull_request_review_changes_fail_ci(self, event_file, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = Decision.REQUEST_CHANGES
+            exit_code = await main()
+
+        assert exit_code == 1
 
     @pytest.mark.asyncio
     async def test_non_pr_event_skipped(self, event_file, monkeypatch):
@@ -81,6 +97,7 @@ class TestCli:
         monkeypatch.setenv("REVIEW_DRY_RUN", "1")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = Decision.APPROVE
             await main()
 
         assert mock_review.call_args.kwargs["dry_run"] is True
@@ -95,6 +112,7 @@ class TestCli:
         monkeypatch.delenv("REVIEW_DRY_RUN", raising=False)
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = Decision.APPROVE
             await main()
 
         assert mock_review.call_args.kwargs.get("dry_run", False) is False
@@ -109,6 +127,7 @@ class TestCli:
         monkeypatch.setenv("REVIEW_MODEL_OVERRIDE", "gpt-5-mini")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = Decision.APPROVE
             await main()
 
         assert mock_review.call_args.kwargs["model_override"] == "gpt-5-mini"
