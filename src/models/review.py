@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class Decision(str, Enum):
     APPROVE = "approve"
-    COMMENT = "comment"
     REQUEST_CHANGES = "request_changes"
 
 

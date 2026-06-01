@@ -218,9 +218,9 @@ def test_mismatch_confidence_defaults_to_70():
 
 
 class TestDecisionEnum:
-    def test_three_values(self):
+    def test_two_values(self):
         # GitHub event 이름과 매칭. APPROVE는 정책상 못 보내지만 결정 라벨로는 유지.
-        assert {d.value for d in Decision} == {"approve", "comment", "request_changes"}
+        assert {d.value for d in Decision} == {"approve", "request_changes"}
 
 
 class TestReviewConfig:

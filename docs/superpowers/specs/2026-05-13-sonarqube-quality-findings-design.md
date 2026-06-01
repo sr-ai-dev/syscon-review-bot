@@ -81,10 +81,10 @@ JSON 출력 형식에 `quality_findings` 배열 추가:
 `compute_decision`에 규칙 추가 (기존 스펙/아키텍처 검사 뒤):
 
 - `quality_findings` 중 `category in {bug, vulnerability}` 존재 → `REQUEST_CHANGES`
-- 그 외 `quality_findings` 존재 (security/smell/complexity만) + 스펙·아키텍처 통과 → `COMMENT`
+- 그 외 `quality_findings` 존재 (security/smell/complexity만) + 스펙·아키텍처 통과 → `APPROVE` 유지
 - `quality_findings` 비어 있으면 → 기존 로직 그대로 (`APPROVE`)
 
-우선순위: 기존 `REQUEST_CHANGES` 조건(spec missing / not aligned / architecture_concern)이 우선. quality로 인한 `COMMENT`는 그 조건들을 통과했을 때만 적용.
+우선순위: 기존 `REQUEST_CHANGES` 조건(spec missing / not aligned / architecture_concern)이 우선. 비차단 quality finding은 판정을 낮추지 않고 본문에 참고 지적으로만 표시한다.
 
 ### 4. `src/github/reviewer.py`
 
@@ -101,7 +101,7 @@ JSON 출력 형식에 `quality_findings` 배열 추가:
 - `tests/test_decision.py`:
   - bug finding 존재 → `REQUEST_CHANGES`
   - vulnerability finding 존재 → `REQUEST_CHANGES`
-  - smell finding만 존재 + 스펙 통과 → `COMMENT`
+  - smell finding만 존재 + 스펙 통과 → `APPROVE`
   - quality_findings 비어있음 → 기존 동작 (`APPROVE`)
   - spec missing + smell finding → 여전히 `REQUEST_CHANGES` (기존 우선)
 - `tests/test_prompt_builder.py`: `build_system_prompt()` 결과에 `quality_findings`, `bug`, `vulnerability` 키워드 포함
