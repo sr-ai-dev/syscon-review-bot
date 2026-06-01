@@ -31,7 +31,7 @@ jobs:
 
 레포 (또는 조직) Secrets에 `OPENAI_API_KEY` 추가하면 끝.
 
-> 봇은 항상 **COMMENT 이벤트**로 리뷰를 남깁니다. 판정(✅ 스펙 부합 / ❌ 수정 필요)은 리뷰 본문 하단 라벨로 표시. 기본 `GITHUB_TOKEN`이 GitHub 정책상 PR APPROVE를 못 하기 때문이며, 실제 머지 차단/승인은 사람이 보고 결정.
+> 봇은 항상 **COMMENT 이벤트**로 리뷰를 남깁니다. 판정(✅ Approved / ❌ 수정 필요)은 리뷰 본문 하단 라벨로 표시. 기본 `GITHUB_TOKEN`이 GitHub 정책상 PR APPROVE를 못 하기 때문이며, 실제 머지 차단/승인은 사람이 보고 결정.
 
 ## 정합성 검토 동작
 
@@ -50,7 +50,7 @@ jobs:
 5. **코드 품질 검사** (항상 수행, SonarQube 스타일): `bug`·`vulnerability`·`security`·`smell`·`complexity` 항목 점검.
    - 발견 0 → 본문에 "이상 없음" 표기
    - `bug`/`vulnerability` 발견 → 결정이 `❌ Request Changes`로 전환
-   - 그 외(`security`/`smell`/`complexity`)만 발견 → 결정이 `💬 Comment`로 전환
+   - 그 외(`security`/`smell`/`complexity`)만 발견 → `✅ Approved` 유지, 본문에 참고 지적으로 표시
 6. **이전 봇 리뷰·사람 코멘트 참고**: 이전 커밋에서 봇이 남긴 리뷰는 재출력하지 않도록 신규/변경분만 보고하며, 마지막 봇 리뷰 이후 작성된 사람 코멘트(일반·라인)를 함께 읽어 "의도/거부" 등 의사를 반영합니다.
 
 ## Configuration (옵션)

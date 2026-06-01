@@ -65,14 +65,14 @@ class TestComputeDecisionQualityFindings:
         )
         assert compute_decision(result) == Decision.REQUEST_CHANGES
 
-    def test_smell_only_downgrades_to_comment(self):
+    def test_smell_only_keeps_approve(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
             quality_findings=[_finding(FindingCategory.SMELL)],
         )
-        assert compute_decision(result) == Decision.COMMENT
+        assert compute_decision(result) == Decision.APPROVE
 
-    def test_security_and_complexity_only_is_comment(self):
+    def test_security_and_complexity_only_keeps_approve(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
             quality_findings=[
@@ -80,7 +80,7 @@ class TestComputeDecisionQualityFindings:
                 _finding(FindingCategory.COMPLEXITY),
             ],
         )
-        assert compute_decision(result) == Decision.COMMENT
+        assert compute_decision(result) == Decision.APPROVE
 
     def test_no_findings_keeps_approve(self):
         result = ReviewResult(

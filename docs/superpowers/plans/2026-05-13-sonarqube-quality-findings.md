@@ -4,7 +4,7 @@
 
 **Goal:** PR 리뷰 봇이 스펙 정합성 검토와 함께 SonarQube 주요 항목(버그·취약점·보안 핫스팟·코드 스멜·복잡도)을 한 번의 LLM 호출로 검토하고, 발견사항을 별도 `quality_findings` 필드로 리뷰 본문에 노출한다.
 
-**Architecture:** 기존 `ReviewResult` 모델에 `QualityFinding` 리스트 필드 1개 추가. 시스템 프롬프트에 검사 섹션과 JSON 스키마 항목 추가. `compute_decision`은 bug/vulnerability 발견 시 REQUEST_CHANGES, 그 외 발견 시 COMMENT로 격하. `format_review_body`에 "코드 품질 검사" 섹션 렌더링. 구조 변경 최소 — 새 모델 1개, 필드 1개.
+**Architecture:** 기존 `ReviewResult` 모델에 `QualityFinding` 리스트 필드 1개 추가. 시스템 프롬프트에 검사 섹션과 JSON 스키마 항목 추가. `compute_decision`은 bug/vulnerability 발견 시 REQUEST_CHANGES, 그 외 발견 시 APPROVE 유지. `format_review_body`에 "코드 품질 검사" 섹션 렌더링. 구조 변경 최소 — 새 모델 1개, 필드 1개.
 
 **Tech Stack:** Python, Pydantic v2, pytest
 
@@ -264,14 +264,14 @@ class TestComputeDecisionQualityFindings:
         )
         assert compute_decision(result) == Decision.REQUEST_CHANGES
 
-    def test_smell_only_downgrades_to_comment(self):
+    def test_smell_only_keeps_approve(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
             quality_findings=[_finding(FindingCategory.SMELL)],
         )
-        assert compute_decision(result) == Decision.COMMENT
+        assert compute_decision(result) == Decision.APPROVE
 
-    def test_security_and_complexity_only_is_comment(self):
+    def test_security_and_complexity_only_keeps_approve(self):
         result = ReviewResult(
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
             quality_findings=[
@@ -279,7 +279,7 @@ class TestComputeDecisionQualityFindings:
                 _finding(FindingCategory.COMPLEXITY),
             ],
         )
-        assert compute_decision(result) == Decision.COMMENT
+        assert compute_decision(result) == Decision.APPROVE
 
     def test_no_findings_keeps_approve(self):
         result = ReviewResult(
@@ -321,8 +321,6 @@ def compute_decision(result: ReviewResult) -> Decision:
         return Decision.REQUEST_CHANGES
     if any(f.category in _BLOCKING_CATEGORIES for f in result.quality_findings):
         return Decision.REQUEST_CHANGES
-    if result.quality_findings:
-        return Decision.COMMENT
     return Decision.APPROVE
 ```
 

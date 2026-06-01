@@ -33,7 +33,6 @@ def _format_item_with_location(description: str, location: str) -> str:
 _VERDICT_LABEL = {
     Decision.APPROVE: "✅ (Approved)",
     Decision.REQUEST_CHANGES: "❌ (수정 필요)",
-    Decision.COMMENT: "💬 (Comment)",
 }
 
 
