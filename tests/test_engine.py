@@ -623,8 +623,9 @@ async def test_spec_gate_blocks_when_no_spec_files(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert decision == Decision.REQUEST_CHANGES
     mock_gpt.review.assert_not_called()
     mock_github.post.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
@@ -643,8 +644,9 @@ async def test_spec_gate_blocks_when_only_one_spec_file(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert decision == Decision.REQUEST_CHANGES
     mock_gpt.review.assert_not_called()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" in payload["body"]
@@ -663,8 +665,9 @@ async def test_spec_gate_passes_with_tasks_and_supporting_spec_file(context, ali
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert decision == Decision.APPROVE
     mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" not in payload["body"]
@@ -682,8 +685,9 @@ async def test_spec_gate_blocks_without_tasks_file(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert decision == Decision.REQUEST_CHANGES
     mock_gpt.review.assert_not_called()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" in payload["body"]
@@ -731,8 +735,9 @@ async def test_spec_gate_uses_files_api_for_escaped_diff_paths(context, aligned_
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert decision == Decision.APPROVE
     mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" not in payload["body"]
@@ -761,8 +766,9 @@ async def test_spec_gate_blocks_on_406_fallback(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        decision = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert decision == Decision.REQUEST_CHANGES
     mock_gpt.review.assert_not_called()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" in payload["body"]

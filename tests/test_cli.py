@@ -49,7 +49,7 @@ class TestCli:
         assert kwargs["context"].pr_number == 5
 
     @pytest.mark.asyncio
-    async def test_pull_request_review_changes_fail_ci(self, event_file, monkeypatch):
+    async def test_pull_request_request_changes_fail_ci(self, event_file, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
         monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
