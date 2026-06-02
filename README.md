@@ -31,7 +31,7 @@ jobs:
 
 레포 (또는 조직) Secrets에 `OPENAI_API_KEY` 추가하면 끝.
 
-> 봇은 항상 **COMMENT 이벤트**로 리뷰를 남깁니다. 판정(✅ Approved / ❌ 수정 필요)은 리뷰 본문 하단 라벨로 표시. 기본 `GITHUB_TOKEN`이 GitHub 정책상 PR APPROVE를 못 하기 때문입니다. CI 결과는 판정과 연동되어, `✅ Approved`면 성공하고 `❌ 수정 필요`면 실패합니다.
+> 봇은 항상 **COMMENT 이벤트**로 리뷰를 남깁니다. 판정(✅ Approved / ❌ 수정 필요)은 리뷰 본문 하단 라벨로 표시. 기본 `GITHUB_TOKEN`이 GitHub 정책상 PR APPROVE를 못 하기 때문입니다. CI 실패는 spec 문서 요건 미충족에만 사용하고, 일반 리뷰 판정(❌ 수정 필요)은 merge 차단용 exit code로 쓰지 않습니다.
 
 ## 정합성 검토 동작
 
