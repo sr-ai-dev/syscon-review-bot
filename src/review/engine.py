@@ -39,6 +39,12 @@ class ReviewContext:
     pr_number: int
 
 
+@dataclass(frozen=True)
+class ReviewRunResult:
+    decision: Decision
+    spec_gate_passed: bool = True
+
+
 async def load_repo_config(
     github_client: GitHubClient,
     repo: str,
@@ -63,7 +69,7 @@ async def review_pr(
     config_path: str = ".github/review-bot.yml",
     model_override: str | None = None,
     dry_run: bool = False,
-) -> Decision:
+) -> ReviewRunResult:
     logger.info(f"Reviewing {context.repo}#{context.pr_number}")
 
     pr_info = await get_pr_info(github_client, context.repo, context.pr_number)
@@ -83,7 +89,7 @@ async def review_pr(
         files = parse_pr_files(raw_files)
     if not files:
         logger.info("Empty diff, skipping")
-        return Decision.APPROVE
+        return ReviewRunResult(Decision.APPROVE)
 
     if config.require_spec_files:
         if raw_files is None:
@@ -94,12 +100,12 @@ async def review_pr(
             await submit_spec_gate_review(
                 github_client, context.repo, context.pr_number, spec_result.message
             )
-            return Decision.REQUEST_CHANGES
+            return ReviewRunResult(Decision.REQUEST_CHANGES, spec_gate_passed=False)
 
     filtered = filter_files(files, config.ignore)
     if not filtered:
         logger.info("All files filtered out")
-        return Decision.APPROVE
+        return ReviewRunResult(Decision.APPROVE)
 
     head_sha = pr_info["head"]["sha"]
     filtered = await _expand_files(
@@ -143,7 +149,7 @@ async def review_pr(
         print("===== USER PROMPT =====")
         print(user_prompt)
         logger.info("Dry run complete (GPT/submit skipped)")
-        return Decision.APPROVE
+        return ReviewRunResult(Decision.APPROVE)
 
     chosen_model = model_override or config.model
 
@@ -170,7 +176,7 @@ async def review_pr(
         f"spec_status={result.spec_status.value}, aligned={result.aligned}, "
         f"decision={decision.value}"
     )
-    return decision
+    return ReviewRunResult(decision)
 
 
 async def _fetch_and_expand(github_client, repo, head_sha, f, max_lines):

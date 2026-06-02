@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from src.cli import main
 from src.models.review import Decision
+from src.review.engine import ReviewRunResult
 
 
 class TestCli:
@@ -39,7 +40,7 @@ class TestCli:
         monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
-            mock_review.return_value = Decision.APPROVE
+            mock_review.return_value = ReviewRunResult(Decision.APPROVE)
             exit_code = await main()
 
         assert exit_code == 0
@@ -49,7 +50,7 @@ class TestCli:
         assert kwargs["context"].pr_number == 5
 
     @pytest.mark.asyncio
-    async def test_pull_request_request_changes_fail_ci(self, event_file, monkeypatch):
+    async def test_pull_request_request_changes_does_not_fail_ci(self, event_file, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
         monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
@@ -57,7 +58,23 @@ class TestCli:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
-            mock_review.return_value = Decision.REQUEST_CHANGES
+            mock_review.return_value = ReviewRunResult(Decision.REQUEST_CHANGES)
+            exit_code = await main()
+
+        assert exit_code == 0
+
+    @pytest.mark.asyncio
+    async def test_spec_gate_failure_returns_error(self, event_file, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = ReviewRunResult(
+                Decision.REQUEST_CHANGES, spec_gate_passed=False
+            )
             exit_code = await main()
 
         assert exit_code == 1
@@ -97,7 +114,7 @@ class TestCli:
         monkeypatch.setenv("REVIEW_DRY_RUN", "1")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
-            mock_review.return_value = Decision.APPROVE
+            mock_review.return_value = ReviewRunResult(Decision.APPROVE)
             await main()
 
         assert mock_review.call_args.kwargs["dry_run"] is True
@@ -112,7 +129,7 @@ class TestCli:
         monkeypatch.delenv("REVIEW_DRY_RUN", raising=False)
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
-            mock_review.return_value = Decision.APPROVE
+            mock_review.return_value = ReviewRunResult(Decision.APPROVE)
             await main()
 
         assert mock_review.call_args.kwargs.get("dry_run", False) is False
@@ -127,7 +144,7 @@ class TestCli:
         monkeypatch.setenv("REVIEW_MODEL_OVERRIDE", "gpt-5-mini")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
-            mock_review.return_value = Decision.APPROVE
+            mock_review.return_value = ReviewRunResult(Decision.APPROVE)
             await main()
 
         assert mock_review.call_args.kwargs["model_override"] == "gpt-5-mini"
