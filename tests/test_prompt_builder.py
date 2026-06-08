@@ -31,8 +31,22 @@ class TestBuildSystemPrompt:
 
     def test_includes_json_schema_fields(self):
         prompt = build_system_prompt()
-        for field in ("spec_status", "aligned", "summary", "mismatches"):
+        for field in ("spec_status", "aligned", "summary", "spec_doc_findings", "mismatches"):
             assert field in prompt
+
+    def test_includes_spec_document_review_criteria(self):
+        prompt = build_system_prompt()
+        for criterion in ("완결성", "일관성", "검증 가능성", "범위 명확성", "추적성", "리스크 명시"):
+            assert criterion in prompt
+        assert "requirements.md" in prompt
+        assert "design.md" in prompt
+        assert "tasks.md" in prompt
+
+    def test_spec_document_review_precedes_code_alignment(self):
+        prompt = build_system_prompt()
+        doc_pos = prompt.index("스펙 문서 자체")
+        code_pos = prompt.index("코드 정합성")
+        assert doc_pos < code_pos
 
     def test_includes_brief_architecture_check(self):
         """스펙 정합성이 주이지만 명백한 아키텍처 문제는 별도 finding으로 보고."""
@@ -205,4 +219,4 @@ class TestSystemPromptConfidence:
         from src.review.prompt_builder import build_system_prompt
         s = build_system_prompt()
         schema_section = s[s.index("출력 형식"):]
-        assert schema_section.count("confidence") >= 2  # mismatches + quality_findings
+        assert schema_section.count("confidence") >= 3  # spec_doc_findings + mismatches + quality_findings

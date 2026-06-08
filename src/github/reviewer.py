@@ -1,5 +1,14 @@
 from src.github.client import GitHubClient
-from src.models.review import ArchitectureFinding, Decision, FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus
+from src.models.review import (
+    ArchitectureFinding,
+    Decision,
+    FindingCategory,
+    Mismatch,
+    QualityFinding,
+    ReviewResult,
+    SpecDocFinding,
+    SpecStatus,
+)
 from src.review.decision import compute_decision
 
 
@@ -17,7 +26,7 @@ def _escape_table_cell(text: str | None) -> str:
     return " ".join(text.split())
 
 
-def _format_location(item: ArchitectureFinding | Mismatch | QualityFinding) -> str:
+def _format_location(item: ArchitectureFinding | Mismatch | QualityFinding | SpecDocFinding) -> str:
     if item.file is None:
         return "_전체 PR_"
     safe = _escape_table_cell(item.file)
@@ -28,6 +37,10 @@ def _format_location(item: ArchitectureFinding | Mismatch | QualityFinding) -> s
 
 def _format_item_with_location(description: str, location: str) -> str:
     return f"{description}<br>위치: {location}"
+
+
+def _format_item_with_meta(description: str, location: str, confidence: int) -> str:
+    return f"{_format_item_with_location(description, location)}<br>신뢰도: {confidence}"
 
 
 _VERDICT_LABEL = {
@@ -49,6 +62,41 @@ def format_review_body(result: ReviewResult) -> str:
     decision = compute_decision(result)
     lines = [BOT_REVIEW_MARKER, "", result.summary]
 
+    if result.spec_status == SpecStatus.MISSING:
+        lines.extend([
+            "",
+            "> PR 본문에 스펙·요구사항 문서가 첨부되지 않아 코드 변경의 의도 정합성을 검증할 수 없습니다.",
+            "> 요구사항을 인라인으로 추가하거나, 스펙 문서/티켓 링크를 PR 본문에 포함시켜주세요.",
+        ])
+    else:
+        lines.append("")
+        lines.append("### 스펙 문서 검토")
+        if result.spec_doc_findings:
+            lines.append("| # | 항목 | 제안 |")
+            lines.append("|---|------|------|")
+            for idx, s in enumerate(result.spec_doc_findings, 1):
+                desc = _escape_table_cell(s.description)
+                sugg = _escape_table_cell(s.suggestion)
+                loc = _format_location(s)
+                item = _format_item_with_meta(desc, loc, s.confidence)
+                lines.append(f"| {idx} | {item} | {sugg} |")
+        else:
+            lines.append("> 이상 없음")
+
+        if result.mismatches:
+            lines.extend([
+                "",
+                "### 스펙과 불일치",
+                "| # | 항목 | 제안 |",
+                "|---|------|------|",
+            ])
+            for idx, m in enumerate(result.mismatches, 1):
+                desc = _escape_table_cell(m.description)
+                sugg = _escape_table_cell(m.suggestion)
+                loc = _format_location(m)
+                item = _format_item_with_meta(desc, loc, m.confidence)
+                lines.append(f"| {idx} | {item} | {sugg} |")
+
     if result.prior_resolved:
         partials = [i for i in result.prior_resolved if i.lstrip().startswith("(부분)")]
         fulls = [i for i in result.prior_resolved if i not in partials]
@@ -68,52 +116,32 @@ def format_review_body(result: ReviewResult) -> str:
             stripped = stripped[len("(부분)"):].lstrip()
             lines.append(f"- 🔶 부분 해결: {_escape_table_cell(stripped)}")
 
-    if result.spec_status == SpecStatus.MISSING:
-        lines.extend([
-            "",
-            "> PR 본문에 스펙·요구사항 문서가 첨부되지 않아 코드 변경의 의도 정합성을 검증할 수 없습니다.",
-            "> 요구사항을 인라인으로 추가하거나, 스펙 문서/티켓 링크를 PR 본문에 포함시켜주세요.",
-        ])
-    elif result.mismatches:
-        lines.extend([
-            "",
-            "### 스펙과 불일치",
-            "| # | 항목 | conf | 제안 |",
-            "|---|------|------|------|",
-        ])
-        for idx, m in enumerate(result.mismatches, 1):
-            desc = _escape_table_cell(m.description)
-            sugg = _escape_table_cell(m.suggestion)
-            loc = _format_location(m)
-            item = _format_item_with_location(desc, loc)
-            lines.append(f"| {idx} | {item} | conf {m.confidence} | {sugg} |")
-
     lines.append("")
     lines.append("### 아키텍처 검토")
     if result.architecture_findings:
-        lines.append("| # | 항목 | conf | 제안 |")
-        lines.append("|---|------|------|------|")
+        lines.append("| # | 항목 | 제안 |")
+        lines.append("|---|------|------|")
         for idx, a in enumerate(result.architecture_findings, 1):
             desc = _escape_table_cell(a.description)
             sugg = _escape_table_cell(a.suggestion)
             loc = _format_location(a)
-            item = _format_item_with_location(desc, loc)
-            lines.append(f"| {idx} | {item} | conf {a.confidence} | {sugg} |")
+            item = _format_item_with_meta(desc, loc, a.confidence)
+            lines.append(f"| {idx} | {item} | {sugg} |")
     else:
         lines.append("> 이상 없음")
 
     lines.append("")
     lines.append("### 코드 품질 검사")
     if result.quality_findings:
-        lines.append("| # | 분류 | 항목 | conf | 제안 |")
-        lines.append("|---|------|------|------|------|")
+        lines.append("| # | 분류 | 항목 | 제안 |")
+        lines.append("|---|------|------|------|")
         for idx, f in enumerate(result.quality_findings, 1):
             cat = _CATEGORY_LABEL[f.category]
             desc = _escape_table_cell(f.description)
             sugg = _escape_table_cell(f.suggestion)
             loc = _format_location(f)
-            item = _format_item_with_location(desc, loc)
-            lines.append(f"| {idx} | {cat} | {item} | conf {f.confidence} | {sugg} |")
+            item = _format_item_with_meta(desc, loc, f.confidence)
+            lines.append(f"| {idx} | {cat} | {item} | {sugg} |")
     else:
         lines.append("> 이상 없음")
 
