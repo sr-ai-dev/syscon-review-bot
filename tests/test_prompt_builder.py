@@ -41,6 +41,8 @@ class TestBuildSystemPrompt:
         assert "requirements.md" in prompt
         assert "design.md" in prompt
         assert "tasks.md" in prompt
+        assert "task.md" in prompt
+        assert "alias" in prompt
 
     def test_spec_document_review_precedes_code_alignment(self):
         prompt = build_system_prompt()

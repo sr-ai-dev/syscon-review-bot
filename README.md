@@ -43,7 +43,7 @@ jobs:
 2. 스펙이 **없으면** → `❌ Request Changes`, 본문에 "스펙 첨부 필수" 안내
 3. 스펙이 **있으면 먼저 스펙 문서 자체를 검토**:
    - 완결성: 요구사항·수용 기준·설계·작업 분해가 구현자가 판단 가능할 만큼 충분한지
-   - 일관성: `requirements.md`, `design.md`, `tasks.md` 사이 범위·용어·동작 충돌이 없는지
+   - 일관성: `requirements.md`, `design.md`, `tasks.md`/`task.md` 사이 범위·용어·동작 충돌이 없는지 (`tasks.md`와 `task.md`는 같은 task 문서 alias)
    - 검증 가능성: 테스트나 리뷰로 확인 가능한 성공/실패 조건, 예외·경계 조건이 있는지
    - 범위 명확성: 이번 PR의 적용 범위·제외 범위·후속 작업 범위가 구분되는지
    - 추적성: task가 어떤 requirement/design 항목을 구현하는지 연결 가능한지
