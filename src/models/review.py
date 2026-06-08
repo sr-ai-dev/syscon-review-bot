@@ -23,6 +23,16 @@ class Mismatch(BaseModel):
     confidence: int = Field(default=70, ge=0, le=100)
 
 
+class SpecDocFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file: str | None = None
+    line: int | None = None
+    description: str
+    suggestion: str
+    confidence: int = Field(default=70, ge=0, le=100)
+
+
 class FindingCategory(str, Enum):
     BUG = "bug"
     VULNERABILITY = "vulnerability"
@@ -59,6 +69,7 @@ class ReviewResult(BaseModel):
     aligned: bool = False
     summary: str
     mismatches: list[Mismatch] = Field(default_factory=list)
+    spec_doc_findings: list[SpecDocFinding] = Field(default_factory=list)
     architecture_findings: list[ArchitectureFinding] = Field(default_factory=list)
     quality_findings: list[QualityFinding] = Field(default_factory=list)
     prior_resolved: list[str] = Field(default_factory=list)

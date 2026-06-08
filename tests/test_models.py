@@ -5,6 +5,7 @@ from src.models.review import (
     ArchitectureFinding,
     Mismatch,
     ReviewResult,
+    SpecDocFinding,
     SpecStatus,
     Decision,
     QualityFinding,
@@ -87,6 +88,22 @@ class TestReviewResult:
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
         )
         assert result.architecture_findings == []
+        assert result.spec_doc_findings == []
+
+    def test_spec_doc_findings_field_accepted(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+            spec_doc_findings=[
+                SpecDocFinding(
+                    file="spec/login/requirements.md", line=12,
+                    description="수용 기준이 성공 조건만 적고 실패 조건을 정의하지 않음",
+                    suggestion="실패 조건과 경계 케이스를 수용 기준에 추가",
+                    confidence=82,
+                ),
+            ],
+        )
+        assert len(result.spec_doc_findings) == 1
+        assert "수용 기준" in result.spec_doc_findings[0].description
 
 
 class TestArchitectureFinding:
@@ -115,6 +132,26 @@ class TestArchitectureFinding:
                 spec_status=SpecStatus.PRESENT, aligned=True, summary="x",
                 score=8,  # 폐기된 필드
             )
+
+
+class TestSpecDocFinding:
+    def test_create_with_location_and_confidence(self):
+        f = SpecDocFinding(
+            file="spec/login/design.md", line=8,
+            description="requirements의 API 경로와 design의 API 경로가 다름",
+            suggestion="두 문서의 API 경로를 하나로 통일",
+            confidence=90,
+        )
+        assert f.file == "spec/login/design.md"
+        assert f.confidence == 90
+
+    def test_confidence_defaults_to_70(self):
+        f = SpecDocFinding(description="d", suggestion="s")
+        assert f.confidence == 70
+
+    def test_confidence_must_be_in_range(self):
+        with pytest.raises(ValidationError):
+            SpecDocFinding(description="d", suggestion="s", confidence=-1)
 
 
 class TestQualityFinding:
