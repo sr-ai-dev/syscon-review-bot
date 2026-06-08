@@ -1,0 +1,20 @@
+name: Spec Alignment Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: sr-ai-dev/syscon-review-bot@main
+        with:
+          openai-key: ${{ secrets.OPENAI_API_KEY }}
