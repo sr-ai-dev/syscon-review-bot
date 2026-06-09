@@ -23,14 +23,13 @@ spec gate 판정에 한해서는 GitHub PR files API의 `filename` 값을 사용
 
 각 `spec/<기능명>/` 디렉터리는 다음 조합을 만족해야 한다.
 
-- `tasks.md`는 필수다.
 - `requirements.md` 또는 `design.md` 중 1개 이상이 필요하다.
 
 예시는 다음과 같다.
 
-- `requirements.md` + `tasks.md`: 통과
-- `design.md` + `tasks.md`: 통과
-- `requirements.md` + `design.md`: 실패
+- `requirements.md`: 통과
+- `design.md`: 통과
+- `requirements.md` + `design.md`: 통과
 - `tasks.md`만 있음: 실패
 
 ## 비목표
