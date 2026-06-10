@@ -1,8 +1,7 @@
 """PR spec documentation check.
 
 Every PR must include changes to at least one spec/<feature>/ directory,
-with task.md or tasks.md and at least one of {requirements.md, design.md}
-modified.
+with at least one of {requirements.md, design.md} modified.
 """
 
 from __future__ import annotations
@@ -16,8 +15,7 @@ SUPPORTING_FILES = ("requirements.md", "design.md")
 SPEC_FILES = (*SUPPORTING_FILES, *TASK_FILES)
 SPEC_DIR_PATTERN = re.compile(r"^spec/([^/]+)/")
 REQUIREMENT_MESSAGE = (
-    f"{' 또는 '.join(TASK_FILES)} 중 1개가 반드시 있어야 하며, "
-    f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상도 함께 있어야 합니다."
+    f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상이 있어야 합니다."
 )
 
 
@@ -51,8 +49,6 @@ def check_spec_files(changed_files: list[str]) -> CheckResult:
     errors = []
     for feature, files in sorted(spec_dirs.items()):
         missing = []
-        if not any(f in files for f in TASK_FILES):
-            missing.append(f"{' 또는 '.join(TASK_FILES)} 중 1개")
         if not any(f in files for f in SUPPORTING_FILES):
             missing.append(f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개")
         if missing:
