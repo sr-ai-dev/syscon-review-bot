@@ -24,12 +24,14 @@ spec gate 판정에 한해서는 GitHub PR files API의 `filename` 값을 사용
 각 `spec/<기능명>/` 디렉터리는 다음 조합을 만족해야 한다.
 
 - `requirements.md` 또는 `design.md` 중 1개 이상이 필요하다.
+- `task.md` 또는 `tasks.md`는 spec 디렉터리 변경으로 검사 대상에 포함되지만 필수는 아니다.
 
 예시는 다음과 같다.
 
 - `requirements.md`: 통과
 - `design.md`: 통과
 - `requirements.md` + `design.md`: 통과
+- `task.md`만 있음: 실패
 - `tasks.md`만 있음: 실패
 
 ## 비목표

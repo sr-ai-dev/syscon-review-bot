@@ -5,7 +5,8 @@
 - [x] `require_spec_files`가 활성화된 경우 spec gate가 GitHub PR files API의 `filename` 값을 사용하도록 수정했다.
 - [x] 406 fallback 경로에서 이미 가져온 PR files API 응답을 재사용하도록 했다.
 - [x] 테스트용 GitHub mock이 실제 PR 파일 메타데이터를 제공하도록 보강했다.
-- [x] spec 문서 규칙에서 `tasks.md` 필수 조건을 제거하고, `requirements.md` 또는 `design.md` 중 1개 이상 조건만 유지했다.
+- [x] spec 문서 규칙에서 `task.md`/`tasks.md` 필수 조건을 제거하고, `requirements.md` 또는 `design.md` 중 1개 이상 조건만 유지했다.
+- [x] `task.md`/`tasks.md`만 변경된 spec 디렉터리는 검사 대상에 포함하되 보조 문서가 없으면 차단하도록 했다.
 - [x] raw diff header에 escaped 한글 spec 경로가 포함되는 회귀 테스트를 추가했다.
 - [x] PR #265의 실제 파일 목록이 `check_spec_files()`를 통과하는지 확인했다.
 - [x] raw diff 파서는 해당 escaped spec 경로를 여전히 놓치며, 회귀 테스트가 원래 실패 지점을 덮는지 확인했다.

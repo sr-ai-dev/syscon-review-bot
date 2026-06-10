@@ -10,8 +10,9 @@ import re
 import sys
 from dataclasses import dataclass
 
+TASK_FILES = ("tasks.md", "task.md")
 SUPPORTING_FILES = ("requirements.md", "design.md")
-SPEC_FILES = SUPPORTING_FILES
+SPEC_FILES = (*SUPPORTING_FILES, *TASK_FILES)
 SPEC_DIR_PATTERN = re.compile(r"^spec/([^/]+)/")
 REQUIREMENT_MESSAGE = (
     f"{' 또는 '.join(SUPPORTING_FILES)} 중 1개 이상이 있어야 합니다."

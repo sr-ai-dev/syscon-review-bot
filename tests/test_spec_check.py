@@ -69,13 +69,23 @@ class TestCheckSpecFiles:
         result = check_spec_files(files)
         assert result.ok
 
-    def test_only_tasks_file_is_ignored_and_fails(self):
+    def test_only_tasks_file_fails_missing_supporting_doc(self):
         files = [
             "spec/login/tasks.md",
         ]
         result = check_spec_files(files)
         assert not result.ok
-        assert "spec 문서 변경이 없습니다" in result.message
+        assert "spec/login/" in result.message
+        assert "requirements.md 또는 design.md 중 1개" in result.message
+
+    def test_only_task_file_fails_missing_supporting_doc(self):
+        files = [
+            "spec/login/task.md",
+        ]
+        result = check_spec_files(files)
+        assert not result.ok
+        assert "spec/login/" in result.message
+        assert "requirements.md 또는 design.md 중 1개" in result.message
 
     def test_multiple_features_all_pass(self):
         files = [
@@ -87,14 +97,15 @@ class TestCheckSpecFiles:
         assert "login" in result.message
         assert "payment" in result.message
 
-    def test_tasks_only_in_other_feature_does_not_block(self):
+    def test_tasks_only_in_other_feature_blocks(self):
         files = [
             "spec/login/requirements.md",
             "spec/payment/tasks.md",
         ]
         result = check_spec_files(files)
-        assert result.ok
-        assert "login" in result.message
+        assert not result.ok
+        assert "spec/payment/" in result.message
+        assert "requirements.md 또는 design.md 중 1개" in result.message
 
     def test_non_required_spec_files_ignored(self):
         files = [
