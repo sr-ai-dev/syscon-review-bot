@@ -65,8 +65,8 @@ def format_review_body(result: ReviewResult) -> str:
     if result.spec_status == SpecStatus.MISSING:
         lines.extend([
             "",
-            "> PR 본문에 스펙·요구사항 문서가 첨부되지 않아 코드 변경의 의도 정합성을 검증할 수 없습니다.",
-            "> 요구사항을 인라인으로 추가하거나, 스펙 문서/티켓 링크를 PR 본문에 포함시켜주세요.",
+            "> PR 본문 또는 diff에서 스펙·요구사항을 식별하지 못했습니다.",
+            "> 정합성 검토와 스펙 문서 검토는 생략하고, 아키텍처와 코드 품질 위주로 검토했습니다.",
         ])
     else:
         lines.append("")

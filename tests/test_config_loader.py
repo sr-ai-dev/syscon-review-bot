@@ -7,6 +7,7 @@ class TestLoadConfig:
         assert isinstance(DEFAULT_CONFIG, ReviewConfig)
         assert DEFAULT_CONFIG.model is None
         assert DEFAULT_CONFIG.ignore.files == []
+        assert DEFAULT_CONFIG.require_spec_files is False
 
     def test_load_yaml_full(self):
         yaml_content = """
@@ -88,3 +89,10 @@ reasoning_effort: null
 """
         cfg = load_config_from_yaml(yaml_text)
         assert cfg.reasoning_effort is None
+
+    def test_loads_require_spec_files_key(self):
+        yaml_text = """
+require_spec_files: true
+"""
+        cfg = load_config_from_yaml(yaml_text)
+        assert cfg.require_spec_files is True

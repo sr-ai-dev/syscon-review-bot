@@ -11,10 +11,12 @@ class TestBuildSystemPrompt:
         for dead in ("점수", "score", "rubric", "critical", "warning", "minor"):
             assert dead not in prompt, f"폐기된 키워드 '{dead}'가 프롬프트에 남아있음"
 
-    def test_includes_spec_missing_critical_instruction(self):
+    def test_includes_spec_missing_optional_instruction(self):
         prompt = build_system_prompt()
         assert "missing" in prompt
         assert "PRESENT" in prompt or "present" in prompt
+        assert "스펙 부재 자체는 수정 요청 사유가 아니다" in prompt
+        assert "코드 품질 검사는 계속 수행" in prompt
 
     def test_spec_sources_include_doc_files_in_diff(self):
         """스펙 위치 둘 다 인식: PR 본문 + diff에 포함된 문서 파일."""

@@ -4,6 +4,10 @@
 review:
   # model: gpt-5.4-mini    # 미설정 시 액션 input의 model → GPTClient 기본값 순으로 적용
 
+# true로 설정하면 spec/<기능명>/ 문서 요건 미충족 시 리뷰를 차단합니다.
+# 기본값 false: spec 문서 없이도 아키텍처·코드 품질 리뷰를 진행합니다.
+# require_spec_files: true
+
 ignore:                    # 정합성 검토 대상에서 제외할 파일
   files:
     - "*.lock"
