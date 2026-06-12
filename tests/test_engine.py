@@ -107,19 +107,19 @@ async def test_review_pr_request_changes_on_mismatches(context):
 
 
 @pytest.mark.asyncio
-async def test_review_pr_request_changes_on_missing_spec(context, missing_spec_result):
+async def test_review_pr_approves_missing_spec_without_blocking_findings(context, missing_spec_result):
     mock_github = _mock_github()
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = missing_spec_result
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
+        new_callable=AsyncMock, return_value=ReviewConfig(),
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "수정 필요" in payload["body"]
+    assert "Approved" in payload["body"]
     assert "스펙" in payload["body"]
 
 

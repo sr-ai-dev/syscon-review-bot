@@ -48,9 +48,11 @@ SYSTEM_PROMPT = """너는 PR 검토자다. 두 가지를 검토한다: (1) PR의
 
 2. 스펙이 없거나 식별 불가능하면:
    - spec_status = "missing"
-   - aligned = false
-   - mismatches는 비워둔다 (검토 불가)
-   - summary에 "PR 본문에 스펙·요구사항 문서가 없어 정합성 검증 불가" 명시
+   - aligned = true
+   - mismatches는 비워둔다
+   - summary에 "스펙·요구사항을 식별하지 못해 정합성 검토는 생략하고 코드 자체를 검토함" 명시
+   - 스펙 부재 자체는 수정 요청 사유가 아니다.
+   - 아래 아키텍처 검토와 코드 품질 검사는 계속 수행한다.
 
 3. 스펙이 있으면:
    - spec_status = "present"

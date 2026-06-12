@@ -21,7 +21,7 @@ from src.models.review import (
 def _result_missing():
     return ReviewResult(
         spec_status=SpecStatus.MISSING, aligned=False,
-        summary="PR 본문에 스펙·요구사항이 없어 검증 불가",
+        summary="스펙·요구사항을 식별하지 못해 코드 자체를 검토함",
     )
 
 
@@ -62,10 +62,12 @@ class TestFormatReviewBody:
         assert "비밀번호 정책 검증 누락" in body
         assert "수정 필요" in body
 
-    def test_missing_spec_explains_requirement(self):
+    def test_missing_spec_explains_limited_alignment_review(self):
         body = format_review_body(_result_missing())
         assert "스펙" in body or "요구사항" in body
-        assert "수정 필요" in body
+        assert "정합성 검토는 생략" in body
+        assert "Approved" in body
+        assert "수정 필요" not in body
         # 스펙 없을 때 mismatch 섹션은 표시 안 함
         assert "src/" not in body
 
@@ -280,7 +282,7 @@ class TestSubmitReview:
         for result, label in [
             (_result_aligned(), "Approved"),
             (_result_mismatched(), "수정 필요"),
-            (_result_missing(), "수정 필요"),
+            (_result_missing(), "Approved"),
         ]:
             client = AsyncMock()
             client.post = AsyncMock(return_value={"id": 1})

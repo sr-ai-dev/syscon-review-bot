@@ -5,9 +5,7 @@ _BLOCKING_CATEGORIES = {FindingCategory.BUG, FindingCategory.VULNERABILITY}
 
 
 def compute_decision(result: ReviewResult) -> Decision:
-    if result.spec_status == SpecStatus.MISSING:
-        return Decision.REQUEST_CHANGES
-    if not result.aligned:
+    if result.spec_status == SpecStatus.PRESENT and not result.aligned:
         return Decision.REQUEST_CHANGES
     if result.architecture_findings:
         return Decision.REQUEST_CHANGES

@@ -40,7 +40,7 @@ jobs:
 1. **스펙·요구사항을 두 위치에서 식별**:
    - PR 본문 (제목·설명에 인라인으로 작성된 요구사항)
    - PR diff에 포함된 문서 파일 (예: `docs/specs/*.md`)
-2. 스펙이 **없으면** → `❌ Request Changes`, 본문에 "스펙 첨부 필수" 안내
+2. 스펙이 **없으면** → 정합성 검토는 생략하고 아키텍처·코드 품질 위주로 검토
 3. 스펙이 **있으면** → 각 요구사항이 코드에 반영되었는지, 스펙 범위 밖 변경이 섞였는지 대조
    - 불일치 0건 → `✅ 스펙 부합` 후보
    - 불일치 1건+ → `❌ Request Changes` + 불일치 항목 표
@@ -53,6 +53,8 @@ jobs:
    - 그 외(`security`/`smell`/`complexity`)만 발견 → `✅ Approved` 유지, 본문에 참고 지적으로 표시
 6. **이전 봇 리뷰·사람 코멘트 참고**: 이전 커밋에서 봇이 남긴 리뷰는 재출력하지 않도록 신규/변경분만 보고하며, 마지막 봇 리뷰 이후 작성된 사람 코멘트(일반·라인)를 함께 읽어 "의도/거부" 등 의사를 반영합니다.
 
+스펙 파일 변경을 PR 리뷰 실행 조건으로 강제하려면 `.github/review-bot.yml`에서 `require_spec_files: true`를 설정합니다. 기본값은 `false`입니다.
+
 ## Configuration (옵션)
 
 소비자 레포 루트에 `.github/review-bot.yml` 추가. 전부 선택사항:
@@ -60,6 +62,8 @@ jobs:
 ```yaml
 review:
   model: gpt-5.4-mini    # 옵션 — 미설정 시 액션 input의 model 사용
+
+require_spec_files: false # 옵션 — true면 spec/<기능명>/ 문서 요건 미충족 시 리뷰 차단
 
 ignore:                  # 정합성 검토 대상에서 제외할 파일
   files: ["*.lock", "dist/**", "**/*.generated.*"]

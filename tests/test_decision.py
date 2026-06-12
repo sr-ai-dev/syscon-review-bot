@@ -13,11 +13,11 @@ def _finding(category):
 
 
 class TestComputeDecision:
-    def test_missing_spec_requests_changes(self):
+    def test_missing_spec_alone_does_not_request_changes(self):
         result = ReviewResult(
             spec_status=SpecStatus.MISSING, aligned=False, summary="no spec",
         )
-        assert compute_decision(result) == Decision.REQUEST_CHANGES
+        assert compute_decision(result) == Decision.APPROVE
 
     def test_present_with_mismatches_requests_changes(self):
         result = ReviewResult(
@@ -88,9 +88,16 @@ class TestComputeDecisionQualityFindings:
         )
         assert compute_decision(result) == Decision.APPROVE
 
-    def test_spec_missing_still_request_changes_despite_smell(self):
+    def test_spec_missing_with_smell_only_keeps_approve(self):
         result = ReviewResult(
             spec_status=SpecStatus.MISSING, aligned=False, summary="no spec",
             quality_findings=[_finding(FindingCategory.SMELL)],
+        )
+        assert compute_decision(result) == Decision.APPROVE
+
+    def test_spec_missing_with_bug_still_requests_changes(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.MISSING, aligned=False, summary="no spec",
+            quality_findings=[_finding(FindingCategory.BUG)],
         )
         assert compute_decision(result) == Decision.REQUEST_CHANGES
