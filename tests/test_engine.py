@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.review.engine import review_pr, ReviewContext
-from src.models.review import ArchitectureFinding, Mismatch, ReviewResult, SpecStatus
+from src.models.review import ArchitectureFinding, Decision, Mismatch, ReviewResult, SpecStatus
 from src.models.config import ReviewConfig
 
 
@@ -78,12 +78,14 @@ async def test_review_pr_submits_when_present(context, aligned_result):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(enable_judge=False, require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     mock_gpt.review.assert_called_once()
     mock_github.post.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "Approved" in payload["body"]
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
 
 
 @pytest.mark.asyncio
@@ -100,10 +102,12 @@ async def test_review_pr_request_changes_on_mismatches(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "수정 필요" in payload["body"]
+    assert result.decision == Decision.REQUEST_CHANGES
+    assert result.spec_gate_passed is True
 
 
 @pytest.mark.asyncio
@@ -116,11 +120,13 @@ async def test_review_pr_approves_missing_spec_without_blocking_findings(context
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "Approved" in payload["body"]
     assert "스펙" in payload["body"]
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
 
 
 @pytest.mark.asyncio
@@ -132,9 +138,11 @@ async def test_review_pr_skips_empty_diff(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
     mock_gpt.review.assert_not_called()
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
 
 
 @pytest.mark.asyncio
@@ -619,8 +627,10 @@ async def test_spec_gate_blocks_when_no_spec_files(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert result.decision == Decision.REQUEST_CHANGES
+    assert result.spec_gate_passed is False
     mock_gpt.review.assert_not_called()
     mock_github.post.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
@@ -628,22 +638,25 @@ async def test_spec_gate_blocks_when_no_spec_files(context):
 
 
 @pytest.mark.asyncio
-async def test_spec_gate_blocks_when_only_one_spec_file(context):
+async def test_spec_gate_passes_when_one_supporting_spec_file(context, aligned_result):
     mock_github = _mock_github_with_spec(
         spec_files=["spec/login/requirements.md"],
         code_files=["src/auth.py"],
     )
     mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
-    mock_gpt.review.assert_not_called()
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
+    mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "조건 불충분" in payload["body"]
+    assert "조건 불충분" not in payload["body"]
 
 
 @pytest.mark.asyncio
@@ -659,31 +672,35 @@ async def test_spec_gate_passes_with_tasks_and_supporting_spec_file(context, ali
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
     mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" not in payload["body"]
 
 
 @pytest.mark.asyncio
-async def test_spec_gate_blocks_without_tasks_file(context):
+async def test_spec_gate_passes_without_tasks_file(context, aligned_result):
     mock_github = _mock_github_with_spec(
         spec_files=["spec/login/requirements.md", "spec/login/design.md"],
         code_files=["src/auth.py"],
     )
     mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
 
     with patch(
         "src.review.engine.load_repo_config",
-        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
+        new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
-    mock_gpt.review.assert_not_called()
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
+    mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
-    assert "조건 불충분" in payload["body"]
-    assert "tasks.md" in payload["body"]
+    assert "조건 불충분" not in payload["body"]
 
 
 @pytest.mark.asyncio
@@ -727,8 +744,10 @@ async def test_spec_gate_uses_files_api_for_escaped_diff_paths(context, aligned_
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True, enable_judge=False),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert result.decision == Decision.APPROVE
+    assert result.spec_gate_passed is True
     mock_gpt.review.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" not in payload["body"]
@@ -757,8 +776,10 @@ async def test_spec_gate_blocks_on_406_fallback(context):
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=ReviewConfig(require_spec_files=True),
     ), _NO_EXPAND:
-        await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
+        result = await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
+    assert result.decision == Decision.REQUEST_CHANGES
+    assert result.spec_gate_passed is False
     mock_gpt.review.assert_not_called()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" in payload["body"]

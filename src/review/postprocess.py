@@ -72,6 +72,10 @@ def postprocess(result: ReviewResult, threshold: int = 70) -> ReviewResult:
     - prior_resolved 항목의 주제가 다른 섹션에 남아있으면 (부분) prefix 자동 부착
     """
     kept_mismatches = [m for m in result.mismatches if m.confidence >= threshold]
+    kept_spec_doc = [
+        f for f in result.spec_doc_findings
+        if f.confidence >= threshold
+    ]
 
     mismatch_locations: set[tuple[str, int]] = {
         key for m in kept_mismatches
@@ -94,6 +98,7 @@ def postprocess(result: ReviewResult, threshold: int = 70) -> ReviewResult:
         new_aligned = len(kept_mismatches) == 0
 
     finding_texts = [m.description for m in kept_mismatches]
+    finding_texts += [s.description for s in kept_spec_doc]
     finding_texts += [q.description for q in kept_quality]
     finding_texts += [a.description for a in kept_architecture]
 
@@ -101,6 +106,7 @@ def postprocess(result: ReviewResult, threshold: int = 70) -> ReviewResult:
 
     return result.model_copy(update={
         "mismatches": kept_mismatches,
+        "spec_doc_findings": kept_spec_doc,
         "architecture_findings": kept_architecture,
         "quality_findings": kept_quality,
         "aligned": new_aligned,

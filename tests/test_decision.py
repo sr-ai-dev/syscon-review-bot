@@ -1,5 +1,14 @@
 from src.review.decision import compute_decision
-from src.models.review import ArchitectureFinding, ReviewResult, SpecStatus, Mismatch, Decision, QualityFinding, FindingCategory
+from src.models.review import (
+    ArchitectureFinding,
+    Decision,
+    FindingCategory,
+    Mismatch,
+    QualityFinding,
+    ReviewResult,
+    SpecDocFinding,
+    SpecStatus,
+)
 
 
 def _mismatch():
@@ -32,6 +41,15 @@ class TestComputeDecision:
             spec_status=SpecStatus.PRESENT, aligned=True, summary="all good",
         )
         assert compute_decision(result) == Decision.APPROVE
+
+    def test_spec_doc_finding_triggers_request_changes(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="doc issue",
+            spec_doc_findings=[
+                SpecDocFinding(description="requirements와 tasks 범위가 다름", suggestion="범위 통일"),
+            ],
+        )
+        assert compute_decision(result) == Decision.REQUEST_CHANGES
 
     def test_architecture_finding_triggers_request_changes(self):
         """스펙 부합해도 아키텍처 우려가 있으면 REQUEST_CHANGES."""

@@ -1,7 +1,8 @@
 import pytest
 
 from src.models.review import (
-    ArchitectureFinding, FindingCategory, Mismatch, QualityFinding, ReviewResult, SpecStatus,
+    ArchitectureFinding, FindingCategory, Mismatch, QualityFinding, ReviewResult,
+    SpecDocFinding, SpecStatus,
 )
 from src.review.postprocess import postprocess
 
@@ -43,6 +44,23 @@ def test_filters_low_confidence_quality_findings():
     )
     out = postprocess(r, threshold=70)
     assert [q.file for q in out.quality_findings] == ["a.py"]
+
+
+def test_filters_low_confidence_spec_doc_findings():
+    r = _result(
+        spec_doc_findings=[
+            SpecDocFinding(
+                file="spec/a/requirements.md", line=1,
+                description="확실한 문서 결함", suggestion="s", confidence=75,
+            ),
+            SpecDocFinding(
+                file="spec/a/design.md", line=2,
+                description="약한 문서 의심", suggestion="s", confidence=50,
+            ),
+        ],
+    )
+    out = postprocess(r, threshold=70)
+    assert [f.file for f in out.spec_doc_findings] == ["spec/a/requirements.md"]
 
 
 def test_dedups_same_file_line_across_mismatches_and_quality_keeping_mismatch():
@@ -143,6 +161,21 @@ def test_prior_resolved_topic_match_uses_findings_after_filtering():
     out = postprocess(r, threshold=70)
     # quality_findings 필터됨 → 주제 매칭 없음 → prefix 추가 안 함
     assert not out.prior_resolved[0].startswith("(부분)")
+
+
+def test_prior_resolved_gets_partial_prefix_from_spec_doc_findings():
+    r = _result(
+        prior_resolved=["requirements tasks 범위 불일치 → 일부 정리"],
+        spec_doc_findings=[
+            SpecDocFinding(
+                description="requirements와 tasks의 범위 불일치가 남아 있음",
+                suggestion="s",
+                confidence=80,
+            ),
+        ],
+    )
+    out = postprocess(r, threshold=70)
+    assert out.prior_resolved[0].startswith("(부분)")
 
 
 def test_prior_resolved_keeps_full_when_only_common_words_overlap():

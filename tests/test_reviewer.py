@@ -14,6 +14,7 @@ from src.models.review import (
     Mismatch,
     QualityFinding,
     ReviewResult,
+    SpecDocFinding,
     SpecStatus,
 )
 
@@ -43,6 +44,21 @@ def _result_mismatched():
     )
 
 
+def _result_with_spec_doc_findings():
+    return ReviewResult(
+        spec_status=SpecStatus.PRESENT, aligned=True,
+        summary="스펙 문서 보완 필요",
+        spec_doc_findings=[
+            SpecDocFinding(
+                file="spec/login/requirements.md", line=7,
+                description="수용 기준이 성공 케이스만 있고 실패 조건을 정의하지 않음",
+                suggestion="실패 조건과 경계 케이스를 수용 기준에 추가",
+                confidence=84,
+            ),
+        ],
+    )
+
+
 class TestFormatReviewBody:
     def test_marker_at_top(self):
         body = format_review_body(_result_aligned())
@@ -55,21 +71,45 @@ class TestFormatReviewBody:
 
     def test_mismatched_lists_each_with_location(self):
         body = format_review_body(_result_mismatched())
+        assert "스펙 문서 검토" in body
         assert "로그아웃 엔드포인트 누락" in body
         assert "위치: `src/auth.py:10`" in body
-        assert "| # | 항목 | conf | 제안 |" in body
-        assert "| # | 항목 | 위치 | conf | 제안 |" not in body
+        assert "| # | 항목 | 제안 |" in body
+        assert "| # | 항목 | conf | 제안 |" not in body
         assert "비밀번호 정책 검증 누락" in body
         assert "수정 필요" in body
 
     def test_missing_spec_explains_limited_alignment_review(self):
         body = format_review_body(_result_missing())
         assert "스펙" in body or "요구사항" in body
-        assert "정합성 검토는 생략" in body
+        assert "정합성 검토와 스펙 문서 검토는 생략" in body
         assert "Approved" in body
         assert "수정 필요" not in body
+        assert "### 스펙 문서 검토" not in body
         # 스펙 없을 때 mismatch 섹션은 표시 안 함
         assert "src/" not in body
+
+    def test_spec_doc_findings_render_first_section(self):
+        body = format_review_body(_result_with_spec_doc_findings())
+        assert "수용 기준이 성공 케이스만" in body
+        assert "위치: `spec/login/requirements.md:7`" in body
+        assert "신뢰도: 84" in body
+        assert "수정 필요" in body
+        spec_doc_pos = body.index("### 스펙 문서 검토")
+        arch_pos = body.index("### 아키텍처 검토")
+        quality_pos = body.index("### 코드 품질 검사")
+        assert spec_doc_pos < arch_pos < quality_pos
+
+    def test_spec_doc_section_precedes_prior_resolved(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="s",
+            prior_resolved=["이전 문서 지적 → 해결"],
+            spec_doc_findings=[
+                SpecDocFinding(description="requirements와 tasks 범위가 다름", suggestion="범위 통일"),
+            ],
+        )
+        body = format_review_body(result)
+        assert body.index("### 스펙 문서 검토") < body.index("### 이전 리뷰 상태")
 
     def test_renders_architecture_findings_when_present(self):
         result = ReviewResult(
@@ -87,9 +127,9 @@ class TestFormatReviewBody:
         body = format_review_body(result)
         assert "아키텍처" in body
         assert "A 모듈이 B를 역참조" in body
-        assert "| # | 항목 | conf | 제안 |" in body
+        assert "| # | 항목 | 제안 |" in body
         assert "위치: `src/a.py:20`" in body
-        assert "conf 85" in body
+        assert "신뢰도: 85" in body
         assert "수정 필요" in body
 
     def test_architecture_section_always_shown(self):
@@ -163,8 +203,8 @@ class TestFormatReviewBodyQuality:
         assert "코드 품질" in body
         assert "None 가능 값을 검사 없이 사용" in body
         assert "위치: `src/svc.py:12`" in body
-        assert "| # | 분류 | 항목 | conf | 제안 |" in body
-        assert "| # | 분류 | 항목 | 위치 | conf | 제안 |" not in body
+        assert "| # | 분류 | 항목 | 제안 |" in body
+        assert "| # | 분류 | 항목 | conf | 제안 |" not in body
         assert "중복 코드 블록" in body
         assert "버그" in body
         assert "코드 스멜" in body
@@ -250,7 +290,7 @@ class TestFilterBotReviews:
         assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
 
 
-def test_mismatch_renders_with_confidence_tag():
+def test_mismatch_renders_confidence_inside_item():
     result = ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=False, summary="s",
         mismatches=[
@@ -258,10 +298,11 @@ def test_mismatch_renders_with_confidence_tag():
         ],
     )
     body = format_review_body(result)
-    assert "conf 85" in body
+    row = next(line for line in body.split("\n") if "d<br>" in line)
+    assert "신뢰도: 85" in row
 
 
-def test_quality_finding_renders_with_confidence_tag():
+def test_quality_finding_renders_confidence_inside_item():
     result = ReviewResult(
         spec_status=SpecStatus.PRESENT, aligned=True, summary="s",
         quality_findings=[
@@ -272,7 +313,8 @@ def test_quality_finding_renders_with_confidence_tag():
         ],
     )
     body = format_review_body(result)
-    assert "conf 72" in body
+    row = next(line for line in body.split("\n") if "d<br>" in line)
+    assert "신뢰도: 72" in row
 
 
 class TestSubmitReview:

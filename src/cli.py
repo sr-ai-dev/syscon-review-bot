@@ -60,7 +60,7 @@ async def main() -> int:
         gpt_client = GPTClient(api_key=openai_key)
 
     try:
-        await review_pr(
+        result = await review_pr(
             context=ReviewContext(repo=repo, pr_number=pr_number),
             github_client=github_client,
             gpt_client=gpt_client,
@@ -68,7 +68,7 @@ async def main() -> int:
             model_override=model_override,
             dry_run=dry_run,
         )
-        return 0
+        return 0 if result.spec_gate_passed else 1
     except Exception:
         logger.exception(f"Review failed for {repo}#{pr_number}")
         return 1
