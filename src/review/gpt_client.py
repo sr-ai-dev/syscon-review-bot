@@ -116,10 +116,27 @@ class GPTClient:
             data = json.loads(content)
         except json.JSONDecodeError:
             data = self._extract_last_json_object(content)
+        self._normalize_prior_resolved(data)
         try:
             return ReviewResult(**data)
         except ValidationError as e:
             raise ValueError(f"Failed to parse GPT response: {e}\nContent: {content}")
+
+    @staticmethod
+    def _normalize_prior_resolved(data: dict) -> None:
+        prior_resolved = data.get("prior_resolved")
+        if not isinstance(prior_resolved, list):
+            return
+
+        normalized: list[str] = []
+        for entry in prior_resolved:
+            if isinstance(entry, str):
+                normalized.append(entry)
+            elif isinstance(entry, dict):
+                normalized.extend(f"{key} → {value}" for key, value in entry.items())
+            else:
+                normalized.append(str(entry))
+        data["prior_resolved"] = normalized
 
     @staticmethod
     def _extract_last_json_object(text: str) -> dict:
