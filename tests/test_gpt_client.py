@@ -238,6 +238,20 @@ def test_parse_handles_clean_json_unchanged():
     assert result.summary == "clean"
 
 
+def test_parse_normalizes_object_prior_resolved_to_human_readable_string():
+    gpt = GPTClient(api_key="x")
+    content = json.dumps({
+        "spec_status": "present",
+        "aligned": True,
+        "summary": "normalized",
+        "prior_resolved": [{"(부분) 기존 지적": "일부 수정, 남은 문제는 아래 참조"}],
+    })
+
+    result = gpt._parse(content)
+
+    assert result.prior_resolved == ["(부분) 기존 지적 → 일부 수정, 남은 문제는 아래 참조"]
+
+
 def test_parse_raises_on_no_valid_json():
     gpt = GPTClient(api_key="x")
     with pytest.raises(ValueError, match="Failed to parse"):
