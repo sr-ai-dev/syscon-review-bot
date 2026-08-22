@@ -7,6 +7,7 @@ from pathlib import Path
 
 from src.github.client import GitHubClient
 from src.review.engine import ReviewContext, review_pr
+from src.review.errors import ReviewInfraError
 from src.review.gpt_client import GPTClient
 
 
@@ -19,6 +20,23 @@ logger = logging.getLogger("syscon-review-bot")
 
 
 REQUIRED_ENV = ("GITHUB_TOKEN", "GITHUB_EVENT_PATH", "GITHUB_EVENT_NAME", "OPENAI_API_KEY")
+
+
+def _write_infra_summary(error: ReviewInfraError) -> None:
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    summary = (
+        "## REVIEW_INFRA_ERROR\n\n"
+        f"- Category: `{error.category.value}`\n"
+        "- Review completed: no\n"
+        "- Code finding produced: no\n"
+    )
+    try:
+        with Path(summary_path).open("a", encoding="utf-8") as stream:
+            stream.write(summary)
+    except OSError:
+        logger.error("Could not write REVIEW_INFRA_ERROR to GitHub Step Summary")
 
 
 async def main() -> int:
@@ -69,6 +87,15 @@ async def main() -> int:
             dry_run=dry_run,
         )
         return 0 if result.spec_gate_passed else 1
+    except ReviewInfraError as exc:
+        logger.error(
+            "REVIEW_INFRA_ERROR for %s#%s: %s",
+            repo,
+            pr_number,
+            exc.category.value,
+        )
+        _write_infra_summary(exc)
+        return 1
     except Exception:
         logger.exception(f"Review failed for {repo}#{pr_number}")
         return 1
