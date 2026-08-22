@@ -127,6 +127,25 @@ class TestBuildSystemPrompt:
         assert "0건" in prompt or "0건이 정상" in prompt
         assert "절대 규칙" in prompt or "추론으로 뒤집" in prompt
 
+    def test_separates_normal_workflow_blockers_from_advisories(self):
+        prompt = build_system_prompt()
+        assert "advisory_findings" in prompt
+        assert "정상 workflow" in prompt
+        assert "blocker" in prompt
+        assert "advisory" in prompt
+
+    def test_malformed_state_hypotheticals_are_advisory_only(self):
+        prompt = build_system_prompt()
+        assert "malformed-state" in prompt
+        assert "직접 변조" in prompt
+        assert "수정 요청" in prompt
+        assert "승격" in prompt
+
+    def test_re_review_does_not_promote_unresolved_advisory_without_new_evidence(self):
+        prompt = build_system_prompt()
+        assert "미해결 advisory" in prompt
+        assert "정상 workflow의 신규 근거" in prompt
+
 
 class TestBuildUserPrompt:
     def _files(self):
@@ -223,4 +242,4 @@ class TestSystemPromptConfidence:
         from src.review.prompt_builder import build_system_prompt
         s = build_system_prompt()
         schema_section = s[s.index("출력 형식"):]
-        assert schema_section.count("confidence") >= 3  # spec_doc_findings + mismatches + quality_findings
+        assert schema_section.count("confidence") >= 4  # blocker findings + advisory_findings

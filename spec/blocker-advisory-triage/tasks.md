@@ -8,6 +8,15 @@
 
 **Tech Stack:** Python 3.11+, Pydantic v2, pytest
 
+## 구현 상태
+
+- Task 1 완료: model RED 확인 후 `tests/test_models.py` 36건 PASS
+- Task 2 완료: advisory-only 승인과 실제 blocker 유지 regression 포함
+- Task 3 완료: prompt RED 3건 확인 후 `tests/test_prompt_builder.py` 33건 PASS
+- Task 4 완료: reviewer RED 확인 후 `tests/test_reviewer.py` 25건 PASS
+- Task 5 완료: 전체 suite 266건 PASS, baseline과 동일한 Python 3.14 AsyncMock warning 1건
+- Task 6은 SR-AMR consumer policy worktree에서 별도 수행
+
 ---
 
 ### Task 1: Advisory model RED/GREEN

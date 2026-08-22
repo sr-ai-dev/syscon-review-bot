@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.review import (
+    AdvisoryFinding,
     ArchitectureFinding,
     Mismatch,
     ReviewResult,
@@ -104,6 +105,40 @@ class TestReviewResult:
         )
         assert len(result.spec_doc_findings) == 1
         assert "수용 기준" in result.spec_doc_findings[0].description
+
+    def test_advisory_findings_default_empty(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
+        )
+        assert result.advisory_findings == []
+
+    def test_advisory_finding_is_accepted(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="정상 workflow는 통과하고 추가 hardening만 제안함",
+            advisory_findings=[
+                AdvisoryFinding(
+                    file="src/state.py",
+                    line=42,
+                    description="인위적으로 손상된 history에 대한 방어 제안",
+                    suggestion="별도 hardening PR에서 검토",
+                    confidence=88,
+                ),
+            ],
+        )
+        assert len(result.advisory_findings) == 1
+        assert result.advisory_findings[0].confidence == 88
+
+
+class TestAdvisoryFinding:
+    def test_extra_field_forbidden(self):
+        with pytest.raises(ValidationError):
+            AdvisoryFinding(
+                description="d",
+                suggestion="s",
+                blocking=False,
+            )
 
 
 class TestArchitectureFinding:

@@ -1,5 +1,6 @@
 from src.review.decision import compute_decision
 from src.models.review import (
+    AdvisoryFinding,
     ArchitectureFinding,
     Decision,
     FindingCategory,
@@ -66,6 +67,35 @@ class TestComputeDecision:
             spec_status=SpecStatus.PRESENT, aligned=True, summary="ok",
         )
         assert compute_decision(result) == Decision.APPROVE
+
+    def test_advisory_only_keeps_approve(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="normal workflow blocker 없음",
+            advisory_findings=[
+                AdvisoryFinding(
+                    description="직접 변조 상태에 대한 방어 강화",
+                    suggestion="별도 hardening으로 검토",
+                ),
+            ],
+        )
+        assert compute_decision(result) == Decision.APPROVE
+
+    def test_advisory_does_not_hide_real_blocker(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="실제 bug와 advisory 동시 발견",
+            quality_findings=[_finding(FindingCategory.BUG)],
+            advisory_findings=[
+                AdvisoryFinding(
+                    description="손상된 내부 상태에 대한 방어 강화",
+                    suggestion="별도 hardening으로 검토",
+                ),
+            ],
+        )
+        assert compute_decision(result) == Decision.REQUEST_CHANGES
 
 
 class TestComputeDecisionQualityFindings:
