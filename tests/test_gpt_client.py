@@ -1,11 +1,13 @@
 import json
 import pytest
 import openai
+import httpx
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.review.gpt_client import GPTClient
 from src.models.review import ReviewResult, SpecStatus
+from src.review.errors import ReviewInfraCategory, ReviewInfraError
 
 
 MOCK_GPT_RESPONSE = json.dumps({
@@ -65,8 +67,41 @@ class TestGPTClient:
             client._client.chat.completions, "create",
             new_callable=AsyncMock, return_value=mock_response,
         ):
-            with pytest.raises(ValueError, match="Failed to parse"):
+            with pytest.raises(ReviewInfraError) as exc_info:
                 await client.review("sys", "usr")
+
+        assert exc_info.value.category == ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
+        assert "not json" not in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_schema_mismatch_is_typed_without_leaking_content(self, client):
+        raw_content = json.dumps({"summary": "sensitive response marker"})
+        mock_response = _mock_msg(content=raw_content, finish_reason="stop")
+
+        with patch.object(
+            client._client.chat.completions, "create",
+            new_callable=AsyncMock, return_value=mock_response,
+        ):
+            with pytest.raises(ReviewInfraError) as exc_info:
+                await client.review("sys", "usr")
+
+        assert exc_info.value.category == ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
+        assert "sensitive response marker" not in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_no_tool_review_uses_strict_schema_once(self, client):
+        mock_response = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
+
+        with patch.object(
+            client._client.chat.completions, "create",
+            new_callable=AsyncMock, return_value=mock_response,
+        ) as mock_create:
+            await client.review("sys", "usr")
+
+        assert mock_create.await_count == 1
+        response_format = mock_create.call_args.kwargs["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is True
 
     @pytest.mark.asyncio
     async def test_model_override(self, client):
@@ -106,7 +141,10 @@ class TestGPTClientRetry:
 
         rate_limit = openai.RateLimitError(
             message="rate limited",
-            response=AsyncMock(status_code=429),
+            response=httpx.Response(
+                429,
+                request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+            ),
             body=None,
         )
 
@@ -124,7 +162,10 @@ class TestGPTClientRetry:
     async def test_no_retry_on_auth_error(self, client):
         auth = openai.AuthenticationError(
             message="bad key",
-            response=AsyncMock(status_code=401),
+            response=httpx.Response(
+                401,
+                request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+            ),
             body=None,
         )
 
@@ -132,19 +173,46 @@ class TestGPTClientRetry:
             client._client.chat.completions, "create",
             new_callable=AsyncMock, side_effect=auth,
         ) as mock_create:
-            with pytest.raises(openai.AuthenticationError):
+            with pytest.raises(ReviewInfraError) as exc_info:
                 await client.review("sys", "usr")
 
+        assert exc_info.value.category == ReviewInfraCategory.OPENAI_TRANSPORT_ERROR
+        assert "bad key" not in str(exc_info.value)
         assert mock_create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_exhaustion_is_typed_transport_error(self, client):
+        rate_limit = openai.RateLimitError(
+            message="rate limited",
+            response=httpx.Response(
+                429,
+                request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+            ),
+            body=None,
+        )
+
+        with patch.object(
+            client._client.chat.completions, "create",
+            new_callable=AsyncMock, side_effect=rate_limit,
+        ) as mock_create:
+            with pytest.raises(ReviewInfraError) as exc_info:
+                await client.review("sys", "usr")
+
+        assert exc_info.value.category == ReviewInfraCategory.OPENAI_TRANSPORT_ERROR
+        assert mock_create.call_count == 3
 
 
 # ---------------------------------------------------------------------------
 # Tool-use loop tests
 # ---------------------------------------------------------------------------
 
-def _mock_msg(content=None, tool_calls=None):
+def _mock_msg(content=None, tool_calls=None, finish_reason=None, refusal=None):
     msg = SimpleNamespace(content=content, tool_calls=tool_calls)
-    return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+    if refusal is not None:
+        msg.refusal = refusal
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason=finish_reason)]
+    )
 
 
 def _mock_tool_call(id_, name, args):
@@ -180,6 +248,11 @@ async def test_tool_use_loop_dispatches_then_returns_final():
     executor.read_file.assert_awaited_once_with("a.py")
     assert result.summary == "ok"
 
+    for call in gpt._client.chat.completions.create.await_args_list:
+        response_format = call.kwargs["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is True
+
 
 @pytest.mark.asyncio
 async def test_tool_use_loop_respects_max_iterations():
@@ -195,10 +268,48 @@ async def test_tool_use_loop_respects_max_iterations():
     executor = AsyncMock()
     executor.read_file.return_value = "x"
 
-    with pytest.raises(ValueError, match="max_tool_iterations"):
+    with pytest.raises(ReviewInfraError) as exc_info:
         await gpt.review("sys", "usr", tool_executor=executor, max_tool_iterations=3)
 
+    assert exc_info.value.category == ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE
     assert gpt._client.chat.completions.create.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "content_filter"])
+async def test_incomplete_finish_reason_is_typed(finish_reason):
+    gpt = GPTClient(api_key="x")
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(
+        return_value=_mock_msg(
+            content=MOCK_GPT_RESPONSE,
+            finish_reason=finish_reason,
+        )
+    )
+
+    with pytest.raises(ReviewInfraError) as exc_info:
+        await gpt.review("sys", "usr")
+
+    assert exc_info.value.category == ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE
+
+
+@pytest.mark.asyncio
+async def test_refusal_is_typed_without_leaking_response():
+    gpt = GPTClient(api_key="x")
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(
+        return_value=_mock_msg(
+            content=None,
+            finish_reason="stop",
+            refusal="sensitive refusal body",
+        )
+    )
+
+    with pytest.raises(ReviewInfraError) as exc_info:
+        await gpt.review("sys", "usr")
+
+    assert exc_info.value.category == ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE
+    assert "sensitive refusal body" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -218,17 +329,17 @@ async def test_review_without_tool_executor_keeps_old_behavior():
     assert result.summary == "ok"
 
 
-def test_parse_extracts_last_json_when_reasoning_model_emits_extra():
-    """Reasoning model이 응답 앞에 부수 텍스트/객체 출력해도 마지막 valid JSON 추출."""
+def test_parse_rejects_extra_objects_outside_strict_json():
     gpt = GPTClient(api_key="x")
     content = (
         '{"path":"a.py"}\n'
         '{"path":"b.py"}\n'
         '{"spec_status":"present","aligned":true,"summary":"ok"}'
     )
-    result = gpt._parse(content)
-    assert result.summary == "ok"
-    assert result.aligned is True
+    with pytest.raises(ReviewInfraError) as exc_info:
+        gpt._parse(content)
+
+    assert exc_info.value.category == ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
 
 
 def test_parse_handles_clean_json_unchanged():
@@ -254,8 +365,10 @@ def test_parse_normalizes_object_prior_resolved_to_human_readable_string():
 
 def test_parse_raises_on_no_valid_json():
     gpt = GPTClient(api_key="x")
-    with pytest.raises(ValueError, match="Failed to parse"):
+    with pytest.raises(ReviewInfraError) as exc_info:
         gpt._parse("not json at all just text")
+
+    assert exc_info.value.category == ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
 
 
 # ---------------------------------------------------------------------------

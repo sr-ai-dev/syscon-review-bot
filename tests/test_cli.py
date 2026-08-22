@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from src.cli import main
 from src.models.review import Decision
 from src.review.engine import ReviewRunResult
+from src.review.errors import ReviewInfraCategory, ReviewInfraError
 
 
 class TestCli:
@@ -78,6 +79,34 @@ class TestCli:
             exit_code = await main()
 
         assert exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_review_infra_error_writes_safe_summary(
+        self, event_file, monkeypatch, tmp_path, caplog
+    ):
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+        error = ReviewInfraError(
+            ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+            "Review response did not match the required schema",
+        )
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.side_effect = error
+            exit_code = await main()
+
+        summary = summary_path.read_text()
+        assert exit_code == 1
+        assert "REVIEW_INFRA_ERROR" in summary
+        assert "RESPONSE_SCHEMA_ERROR" in summary
+        assert "Code finding produced: no" in summary
+        assert "sk-test" not in summary
+        assert "sk-test" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_non_pr_event_skipped(self, event_file, monkeypatch):
