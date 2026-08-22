@@ -8,6 +8,7 @@ from src.github.reviewer import (
     submit_review,
 )
 from src.models.review import (
+    AdvisoryFinding,
     ArchitectureFinding,
     Decision,
     FindingCategory,
@@ -164,6 +165,31 @@ class TestFormatReviewBody:
         body = format_review_body(result)
         row = next(line for line in body.split("\n") if "Line1" in line)
         assert "Line2" in row
+
+    def test_advisory_only_renders_section_and_approves(self):
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="정상 workflow 위반 없음",
+            advisory_findings=[
+                AdvisoryFinding(
+                    file="src/state.py",
+                    line=24,
+                    description="직접 변조된 timestamp 입력에 대한 방어 강화 가능",
+                    suggestion="별도 hardening PR에서 검토",
+                    confidence=76,
+                ),
+            ],
+        )
+
+        body = format_review_body(result)
+
+        assert "### 참고 사항 (Advisory)" in body
+        assert "직접 변조된 timestamp" in body
+        assert "위치: `src/state.py:24`" in body
+        assert "신뢰도: 76" in body
+        assert "Approved" in body
+        assert "수정 필요" not in body
 
 
 def _result_with_prior_resolved():

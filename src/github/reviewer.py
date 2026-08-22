@@ -1,5 +1,6 @@
 from src.github.client import GitHubClient
 from src.models.review import (
+    AdvisoryFinding,
     ArchitectureFinding,
     Decision,
     FindingCategory,
@@ -26,7 +27,7 @@ def _escape_table_cell(text: str | None) -> str:
     return " ".join(text.split())
 
 
-def _format_location(item: ArchitectureFinding | Mismatch | QualityFinding | SpecDocFinding) -> str:
+def _format_location(item: AdvisoryFinding | ArchitectureFinding | Mismatch | QualityFinding | SpecDocFinding) -> str:
     if item.file is None:
         return "_전체 PR_"
     safe = _escape_table_cell(item.file)
@@ -144,6 +145,21 @@ def format_review_body(result: ReviewResult) -> str:
             lines.append(f"| {idx} | {cat} | {item} | {sugg} |")
     else:
         lines.append("> 이상 없음")
+
+    if result.advisory_findings:
+        lines.extend([
+            "",
+            "### 참고 사항 (Advisory)",
+            "> 정상 workflow의 수정 요청 사유가 아닌 선택적 hardening 제안입니다.",
+            "| # | 항목 | 제안 |",
+            "|---|------|------|",
+        ])
+        for idx, advisory in enumerate(result.advisory_findings, 1):
+            desc = _escape_table_cell(advisory.description)
+            sugg = _escape_table_cell(advisory.suggestion)
+            loc = _format_location(advisory)
+            item = _format_item_with_meta(desc, loc, advisory.confidence)
+            lines.append(f"| {idx} | {item} | {sugg} |")
 
     lines.append("")
     lines.append(f"### 판정: {_VERDICT_LABEL[decision]}")
