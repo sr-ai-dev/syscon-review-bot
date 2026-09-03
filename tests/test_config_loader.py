@@ -96,3 +96,16 @@ require_spec_files: true
 """
         cfg = load_config_from_yaml(yaml_text)
         assert cfg.require_spec_files is True
+
+    def test_repository_config_cannot_weaken_trusted_cost_policy(self):
+        cfg = load_config_from_yaml(
+            """
+cost_control_enabled: false
+max_review_cost_usd: 999
+max_review_requests: 999
+"""
+        )
+
+        assert not hasattr(cfg, "cost_control_enabled")
+        assert not hasattr(cfg, "max_review_cost_usd")
+        assert not hasattr(cfg, "max_review_requests")

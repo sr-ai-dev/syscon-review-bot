@@ -2,6 +2,7 @@ import json
 import logging
 
 from src.review.tool_executor import ToolExecutor
+from src.review.token_counter import truncate_tokens
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ async def dispatch_tool_call(
     tool_call: dict,
     executor: ToolExecutor,
     max_chars: int = 32000,
+    max_tokens: int | None = None,
 ) -> str:
     name = tool_call["function"]["name"]
     try:
@@ -71,10 +73,10 @@ async def dispatch_tool_call(
     try:
         if name == "read_file":
             result = await executor.read_file(args["path"])
-            return _truncate(result, max_chars)
+            return _limit(result, max_chars, max_tokens)
         if name == "grep":
             matches = await executor.grep(args["pattern"], args.get("path_glob"))
-            return _truncate(json.dumps(matches, ensure_ascii=False), max_chars)
+            return _limit(json.dumps(matches, ensure_ascii=False), max_chars, max_tokens)
     except KeyError as e:
         return f"error: missing argument {e}"
     except Exception as e:
@@ -88,3 +90,8 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + f"\n…(잘림: {len(text) - max_chars} chars truncated)"
+
+
+def _limit(text: str, max_chars: int, max_tokens: int | None) -> str:
+    limited = _truncate(text, max_chars)
+    return truncate_tokens(limited, max_tokens) if max_tokens is not None else limited

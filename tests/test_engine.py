@@ -6,6 +6,8 @@ import httpx
 from src.review.engine import review_pr, ReviewContext
 from src.models.review import ArchitectureFinding, Decision, Mismatch, ReviewResult, SpecStatus
 from src.models.config import ReviewConfig
+from src.models.review_pipeline import ReviewRoute
+from src.review.cost import CostPolicy
 
 
 @pytest.fixture
@@ -68,6 +70,17 @@ def _mock_github(diff="diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x", **dispatch_kw
 _NO_EXPAND = patch("src.review.engine.get_repo_file", new_callable=AsyncMock, return_value=None)
 
 
+def _large_diff(*files: tuple[str, int]) -> str:
+    chunks = []
+    for path, additions in files:
+        lines = "\n".join(f"+line_{index}" for index in range(additions))
+        chunks.append(
+            f"diff --git a/{path} b/{path}\n"
+            f"@@ -0,0 +1,{additions} @@\n{lines}\n"
+        )
+    return "".join(chunks)
+
+
 @pytest.mark.asyncio
 async def test_review_pr_submits_when_present(context, aligned_result):
     mock_github = _mock_github()
@@ -86,6 +99,72 @@ async def test_review_pr_submits_when_present(context, aligned_result):
     assert "Approved" in payload["body"]
     assert result.decision == Decision.APPROVE
     assert result.spec_gate_passed is True
+
+
+@pytest.mark.asyncio
+async def test_multi_review_is_internal_and_posts_one_normal_review(context, aligned_result):
+    mock_github = _mock_github(
+        diff=_large_diff(("src/auth/a.py", 700), ("src/orders/b.py", 700))
+    )
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_judge=False, enable_tool_use=False, require_spec_files=False),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.route is ReviewRoute.MULTI
+    assert mock_gpt.review.await_count == 4
+    mock_github.post.assert_awaited_once()
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "Approved" in body
+    assert "PR 분할 필요" not in body
+
+
+@pytest.mark.asyncio
+async def test_oversized_pr_posts_split_request_without_llm(context):
+    mock_github = _mock_github(diff=_large_diff(("src/huge.py", 2501)))
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(require_spec_files=False),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_awaited_once()
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "PR 분할 필요" in body
+    assert "SIZE_LIMIT" in body
+
+
+@pytest.mark.asyncio
+async def test_cost_preflight_posts_split_request_without_llm(context):
+    mock_github = _mock_github()
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(require_spec_files=False),
+    ), _NO_EXPAND:
+        result = await review_pr(
+            context,
+            mock_github,
+            mock_gpt,
+            cost_policy=CostPolicy(hard_limit_usd="0.01"),
+        )
+
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_awaited_once()
+    assert "COST_PREFLIGHT_EXCEEDED" in mock_github.post.call_args.kwargs["json_data"]["body"]
 
 
 @pytest.mark.asyncio
@@ -180,7 +259,7 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -234,7 +313,7 @@ async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_re
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -258,14 +337,14 @@ async def test_review_pr_uses_config_model(context, aligned_result):
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = aligned_result
 
-    cfg = ReviewConfig(model="gpt-5-mini", require_spec_files=False)
+    cfg = ReviewConfig(model="gpt-5.6-terra", require_spec_files=False)
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=cfg,
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
-    assert mock_gpt.review.call_args.kwargs["model"] == "gpt-5-mini"
+    assert mock_gpt.review.call_args.kwargs["model"] == "gpt-5.6-terra"
 
 
 @pytest.mark.asyncio
@@ -310,7 +389,7 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -371,7 +450,7 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
     )
 
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -388,7 +467,7 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
 
 
 @pytest.mark.asyncio
-async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligned_result):
+async def test_review_pr_requests_split_instead_of_reviewing_incomplete_diff(context, aligned_result):
     huge = "a" * 250000
     diff = (
         "diff --git a/huge.py b/huge.py\n"
@@ -397,7 +476,7 @@ async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligne
         "@@ -1,1 +1,1 @@\n+ok\n"
     )
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
     mock_github = _mock_github(diff=diff)
@@ -405,9 +484,10 @@ async def test_review_pr_drops_oversized_files_and_notes_skipped(context, aligne
     mock_gpt.review.side_effect = fake_review
     with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(token_budget=5000, enable_judge=False, require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
-    assert "small.py" in captured["user"]
-    assert ("a" * 1000) not in captured["user"]
-    assert "토큰 예산" in captured["user"] or "huge.py" in captured["user"]
+    mock_gpt.review.assert_not_called()
+    body = mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert "PR 분할 필요" in body
+    assert "INCOMPLETE_DIFF" in body
 
 
 @pytest.mark.asyncio
@@ -423,7 +503,7 @@ async def test_review_pr_runs_judge_when_enabled(context):
         architecture_findings=[ArchitectureFinding(description="X 잔존", suggestion="s")],
     )
     call_count = {"n": 0}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         call_count["n"] += 1
         return first if call_count["n"] == 1 else judged
 
@@ -443,7 +523,7 @@ async def test_review_pr_runs_judge_when_enabled(context):
 @pytest.mark.asyncio
 async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
     call_count = {"n": 0}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         call_count["n"] += 1
         return aligned_result
 
@@ -461,7 +541,7 @@ async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
 @pytest.mark.asyncio
 async def test_review_pr_creates_tool_executor_when_enabled(context, aligned_result):
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["tool_executor"] = tool_executor
         captured["max_tool_iterations"] = max_tool_iterations
         return aligned_result
@@ -477,13 +557,13 @@ async def test_review_pr_creates_tool_executor_when_enabled(context, aligned_res
     assert captured["tool_executor"] is not None
     assert hasattr(captured["tool_executor"], "read_file")
     assert hasattr(captured["tool_executor"], "grep")
-    assert captured["max_tool_iterations"] == 5
+    assert captured["max_tool_iterations"] == 2
 
 
 @pytest.mark.asyncio
 async def test_review_pr_omits_tool_executor_when_disabled(context, aligned_result):
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high"):
+    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
         captured["tool_executor"] = tool_executor
         return aligned_result
 
@@ -583,6 +663,34 @@ async def test_review_pr_falls_back_to_files_api_on_406(context, aligned_result)
 
     mock_github.get_json_list.assert_called_once()
     mock_gpt.review.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_files_api_missing_required_patch_requests_split(context):
+    async def raise_406(*args, **kwargs):
+        request = httpx.Request("GET", "https://api.github.com/repos/owner/repo/pulls/42")
+        response = httpx.Response(406, request=request)
+        raise httpx.HTTPStatusError("406 Not Acceptable", request=request, response=response)
+
+    mock_github = _mock_github()
+    mock_github.get.side_effect = raise_406
+    mock_github.get_json_list.return_value = [
+        {"filename": "src/a.py", "patch": "@@ -1 +1 @@\n+x", "additions": 1, "deletions": 0},
+        {"filename": "src/b.py", "additions": 20, "deletions": 4},
+    ]
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(require_spec_files=False),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_awaited_once()
+    assert "INCOMPLETE_DIFF" in mock_github.post.call_args.kwargs["json_data"]["body"]
 
 
 @pytest.mark.asyncio

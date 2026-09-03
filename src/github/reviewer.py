@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from src.github.client import GitHubClient
 from src.models.review import (
     AdvisoryFinding,
@@ -14,6 +16,7 @@ from src.review.decision import compute_decision
 
 
 BOT_REVIEW_MARKER = "## 🤖 AI 리뷰"
+SPLIT_REQUEST_MARKER_PREFIX = "<!-- syscon-review-bot:split-request head_sha="
 
 
 def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
@@ -25,6 +28,69 @@ def _escape_table_cell(text: str | None) -> str:
         return ""
     text = text.replace("|", r"\|")
     return " ".join(text.split())
+
+
+def _format_metric(value: int | float) -> str:
+    if isinstance(value, int):
+        return f"{value:,}"
+    return f"{value:,.10f}".rstrip("0").rstrip(".")
+
+
+def _format_inline_code(value: str) -> str:
+    # Reason codes and paths are rendered as one line and cannot break the marker/body.
+    safe = " ".join(value.split()).replace("`", "'")
+    return f"`{safe}`"
+
+
+def format_split_request_body(
+    *,
+    effective_lines: int | float,
+    effective_files: int | float,
+    raw_diff_tokens: int,
+    max_effective_lines: int | float,
+    max_effective_files: int | float,
+    max_raw_diff_tokens: int,
+    reason_codes: Sequence[str],
+    suggested_groups: Sequence[Sequence[str]],
+    head_sha: str,
+) -> str:
+    """Build the policy-only response used when a complete review cannot run."""
+    reasons = ", ".join(_format_inline_code(code) for code in reason_codes)
+    safe_sha = "".join(head_sha.split()).replace("--", "")
+    lines = [
+        BOT_REVIEW_MARKER,
+        "",
+        "### 판정: 🚫 PR 분할 필요",
+        "",
+        "> 자동 리뷰 가능 범위를 초과했습니다.",
+        "",
+        (
+            f"측정: 가중 변경량 {_format_metric(effective_lines)}줄 / "
+            f"유효 파일 {_format_metric(effective_files)}개 / "
+            f"raw diff {_format_metric(raw_diff_tokens)} tokens"
+        ),
+        (
+            f"기준: 가중 변경량 {_format_metric(max_effective_lines)}줄 / "
+            f"유효 파일 {_format_metric(max_effective_files)}개 / "
+            f"raw diff {_format_metric(max_raw_diff_tokens)} tokens"
+        ),
+        "",
+        f"사유 코드: {reasons}",
+    ]
+
+    if suggested_groups:
+        lines.extend(["", "권장 분할 그룹:"])
+        for index, group in enumerate(suggested_groups, 1):
+            paths = ", ".join(_format_inline_code(path) for path in group)
+            lines.append(f"- 그룹 {index}: {paths}")
+
+    lines.extend([
+        "",
+        "기능 또는 독립 배포·롤백 단위로 PR을 분리해주세요.",
+        "",
+        f"{SPLIT_REQUEST_MARKER_PREFIX}{safe_sha} -->",
+    ])
+    return "\n".join(lines)
 
 
 def _format_location(item: AdvisoryFinding | ArchitectureFinding | Mismatch | QualityFinding | SpecDocFinding) -> str:
@@ -176,6 +242,38 @@ async def submit_review(
     # 기본 GITHUB_TOKEN은 GitHub 정책상 APPROVE 이벤트를 거부한다(422).
     # 봇의 결정은 본문 라벨로 노출하고, API 이벤트는 항상 COMMENT로 통일.
     body = format_review_body(result)
+    await client.post(
+        f"/repos/{repo}/pulls/{pr_number}/reviews",
+        json_data={"body": body, "event": "COMMENT"},
+    )
+
+
+async def submit_split_request(
+    client: GitHubClient,
+    repo: str,
+    pr_number: int,
+    *,
+    effective_lines: int | float,
+    effective_files: int | float,
+    raw_diff_tokens: int,
+    max_effective_lines: int | float,
+    max_effective_files: int | float,
+    max_raw_diff_tokens: int,
+    reason_codes: Sequence[str],
+    suggested_groups: Sequence[Sequence[str]],
+    head_sha: str,
+) -> None:
+    body = format_split_request_body(
+        effective_lines=effective_lines,
+        effective_files=effective_files,
+        raw_diff_tokens=raw_diff_tokens,
+        max_effective_lines=max_effective_lines,
+        max_effective_files=max_effective_files,
+        max_raw_diff_tokens=max_raw_diff_tokens,
+        reason_codes=reason_codes,
+        suggested_groups=suggested_groups,
+        head_sha=head_sha,
+    )
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
         json_data={"body": body, "event": "COMMENT"},

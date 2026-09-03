@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 from src.github.reviewer import (
     BOT_REVIEW_MARKER,
     filter_bot_reviews,
+    format_split_request_body,
     format_review_body,
+    submit_split_request,
     submit_review,
 )
 from src.models.review import (
@@ -358,3 +360,79 @@ class TestSubmitReview:
             payload = client.post.call_args.kwargs["json_data"]
             assert payload["event"] == "COMMENT"
             assert label in payload["body"]
+
+
+class TestSplitRequest:
+    def test_formats_deterministic_policy_only_body(self):
+        kwargs = {
+            "effective_lines": 2840,
+            "effective_files": 61,
+            "raw_diff_tokens": 112400,
+            "max_effective_lines": 2500,
+            "max_effective_files": 80,
+            "max_raw_diff_tokens": 100000,
+            "reason_codes": ["SIZE_LIMIT", "UNPACKABLE_CHANGE"],
+            "suggested_groups": [
+                ["services/auth/api.py", "tests/auth/test_api.py"],
+                ["packages/session/store.py"],
+            ],
+            "head_sha": "abc123def456",
+        }
+
+        first = format_split_request_body(**kwargs)
+        second = format_split_request_body(**kwargs)
+
+        assert first == second
+        assert first.startswith(BOT_REVIEW_MARKER)
+        assert "### 판정: 🚫 PR 분할 필요" in first
+        assert "가중 변경량 2,840줄 / 유효 파일 61개 / raw diff 112,400 tokens" in first
+        assert "가중 변경량 2,500줄 / 유효 파일 80개 / raw diff 100,000 tokens" in first
+        assert "`SIZE_LIMIT`, `UNPACKABLE_CHANGE`" in first
+        assert "그룹 1: `services/auth/api.py`, `tests/auth/test_api.py`" in first
+        assert "그룹 2: `packages/session/store.py`" in first
+        assert "<!-- syscon-review-bot:split-request head_sha=abc123def456 -->" in first
+        assert "finding" not in first.lower()
+
+    def test_formats_fractional_weighted_metrics_without_float_noise(self):
+        body = format_split_request_body(
+            effective_lines=1200.5,
+            effective_files=40.35,
+            raw_diff_tokens=40001,
+            max_effective_lines=2500,
+            max_effective_files=80,
+            max_raw_diff_tokens=100000,
+            reason_codes=["SIZE_LIMIT"],
+            suggested_groups=[],
+            head_sha="deadbeef",
+        )
+
+        assert "1,200.5줄" in body
+        assert "40.35개" in body
+        assert "권장 분할 그룹" not in body
+
+    @pytest.mark.asyncio
+    async def test_submits_exactly_one_comment_without_review_findings(self):
+        client = AsyncMock()
+        client.post = AsyncMock(return_value={"id": 1})
+
+        await submit_split_request(
+            client,
+            "owner/repo",
+            7,
+            effective_lines=2840,
+            effective_files=61,
+            raw_diff_tokens=112400,
+            max_effective_lines=2500,
+            max_effective_files=80,
+            max_raw_diff_tokens=100000,
+            reason_codes=["COST_PREFLIGHT_EXCEEDED"],
+            suggested_groups=[["src/a.py"], ["src/b.py"]],
+            head_sha="abc123",
+        )
+
+        client.post.assert_awaited_once()
+        assert client.post.call_args.args == ("/repos/owner/repo/pulls/7/reviews",)
+        payload = client.post.call_args.kwargs["json_data"]
+        assert payload["event"] == "COMMENT"
+        assert "COST_PREFLIGHT_EXCEEDED" in payload["body"]
+        assert "abc123" in payload["body"]

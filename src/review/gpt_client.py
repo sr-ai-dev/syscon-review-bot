@@ -1,4 +1,6 @@
+import asyncio
 import json
+from uuid import uuid4
 
 import openai
 from openai import AsyncOpenAI
@@ -15,6 +17,8 @@ from src.review.errors import ReviewInfraCategory, ReviewInfraError
 from src.review.llm_tools import TOOL_SCHEMAS, dispatch_tool_call
 from src.review.structured_output import REVIEW_RESPONSE_FORMAT
 from src.review.tool_executor import ToolExecutor
+from src.review.cost import CostLedger, estimate_request_ceiling_nusd
+from src.review.token_counter import count_tokens
 
 
 RETRYABLE_OPENAI_ERRORS = (
@@ -29,6 +33,10 @@ class GPTClient:
     def __init__(self, api_key: str, model: str = "gpt-5.6-terra"):
         self._client = AsyncOpenAI(api_key=api_key)
         self._default_model = model
+
+    @property
+    def default_model(self) -> str:
+        return self._default_model
 
     @retry(
         retry=retry_if_exception_type(RETRYABLE_OPENAI_ERRORS),
@@ -48,6 +56,66 @@ class GPTClient:
                 "OpenAI request failed after the configured retry policy",
             ) from exc
 
+    async def _metered_request(
+        self,
+        *,
+        cost_ledger: CostLedger | None,
+        cost_stage: str,
+        max_completion_tokens: int | None,
+        **kwargs,
+    ):
+        if max_completion_tokens is not None:
+            kwargs["max_completion_tokens"] = max_completion_tokens
+        if cost_ledger is None:
+            return await self._request(**kwargs)
+
+        input_tokens = count_tokens(
+            json.dumps(kwargs, ensure_ascii=False, separators=(",", ":"), default=str)
+        )
+        output_tokens = max_completion_tokens or cost_ledger.policy.max_completion_tokens_per_call
+        ceiling = estimate_request_ceiling_nusd(
+            input_tokens,
+            output_tokens,
+            cost_ledger.pricing,
+            margin_bps=cost_ledger.policy.preflight_margin_bps,
+        )
+        response = None
+        for attempt in range(3):
+            call_id = f"{cost_stage}:attempt-{attempt + 1}:{uuid4().hex}"
+            await cost_ledger.reserve(call_id, ceiling)
+            try:
+                response = await self._client.chat.completions.create(**kwargs)
+                break
+            except RETRYABLE_OPENAI_ERRORS as exc:
+                await cost_ledger.reconcile(call_id, None, None, None)
+                if attempt == 2:
+                    raise ReviewInfraError(
+                        ReviewInfraCategory.OPENAI_TRANSPORT_ERROR,
+                        "OpenAI request failed after the configured retry policy",
+                    ) from exc
+                await asyncio.sleep(min(2 ** (attempt + 1), 30))
+            except openai.OpenAIError as exc:
+                await cost_ledger.reconcile(call_id, None, None, None)
+                raise ReviewInfraError(
+                    ReviewInfraCategory.OPENAI_TRANSPORT_ERROR,
+                    "OpenAI request failed after the configured retry policy",
+                ) from exc
+
+        if response is None:  # defensive; every branch above returns or raises
+            raise RuntimeError("metered request ended without a response")
+
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached_tokens = getattr(details, "cached_tokens", 0) if usage is not None else None
+        if prompt_tokens is None or completion_tokens is None:
+            prompt_tokens = cached_tokens = completion_tokens = None
+        await cost_ledger.reconcile(
+            call_id, prompt_tokens, cached_tokens, completion_tokens
+        )
+        return response
+
     async def review(
         self,
         system_prompt: str,
@@ -56,6 +124,9 @@ class GPTClient:
         tool_executor: ToolExecutor | None = None,
         max_tool_iterations: int = 8,
         reasoning_effort: str | None = None,
+        max_completion_tokens: int | None = None,
+        cost_ledger: CostLedger | None = None,
+        cost_stage: str = "review",
     ) -> ReviewResult:
         chosen_model = model or self._default_model
         messages: list[dict] = [
@@ -76,11 +147,19 @@ class GPTClient:
                 kwargs["reasoning_effort"] = reasoning_effort
             else:
                 kwargs["temperature"] = 0.1
-            response = await self._request(**kwargs)
+            response = await self._metered_request(
+                cost_ledger=cost_ledger,
+                cost_stage=cost_stage,
+                max_completion_tokens=max_completion_tokens,
+                **kwargs,
+            )
             return self._parse_final_response(response)
 
         for _ in range(max_tool_iterations):
-            response = await self._request(
+            response = await self._metered_request(
+                cost_ledger=cost_ledger,
+                cost_stage=f"{cost_stage}:tool-{_ + 1}",
+                max_completion_tokens=max_completion_tokens,
                 model=chosen_model,
                 messages=messages,
                 response_format=REVIEW_RESPONSE_FORMAT,
@@ -111,6 +190,11 @@ class GPTClient:
                 result_text = await dispatch_tool_call(
                     {"function": {"name": tc.function.name, "arguments": tc.function.arguments}},
                     tool_executor,
+                    max_tokens=(
+                        cost_ledger.policy.max_tool_result_tokens_per_call
+                        if cost_ledger is not None
+                        else None
+                    ),
                 )
                 messages.append({
                     "role": "tool",
