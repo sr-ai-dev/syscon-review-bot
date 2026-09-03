@@ -3,12 +3,14 @@ import json
 import logging
 import os
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 from src.github.client import GitHubClient
-from src.review.engine import ReviewContext, review_pr
+from src.review.engine import ReviewContext, ReviewRunResult, review_pr
 from src.review.errors import ReviewInfraError
 from src.review.gpt_client import GPTClient
+from src.review.cost import CostPolicy
 
 
 logging.basicConfig(
@@ -37,6 +39,25 @@ def _write_infra_summary(error: ReviewInfraError) -> None:
             stream.write(summary)
     except OSError:
         logger.error("Could not write REVIEW_INFRA_ERROR to GitHub Step Summary")
+
+
+def _write_review_summary(result: ReviewRunResult) -> None:
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    route = result.route.value if result.route is not None else "none"
+    cost_usd = Decimal(result.cost_nusd) / Decimal(1_000_000_000)
+    summary = (
+        "## Syscon review\n\n"
+        f"- Route: `{route}`\n"
+        f"- Decision: `{result.decision.value}`\n"
+        f"- Accounted cost: `${cost_usd:.6f}`\n"
+    )
+    try:
+        with Path(summary_path).open("a", encoding="utf-8") as stream:
+            stream.write(summary)
+    except OSError:
+        logger.error("Could not write review result to GitHub Step Summary")
 
 
 async def main() -> int:
@@ -70,6 +91,17 @@ async def main() -> int:
     model_override = os.environ.get("REVIEW_MODEL_OVERRIDE") or None
     config_path = os.environ.get("REVIEW_CONFIG_PATH", ".github/review-bot.yml")
     dry_run = bool(os.environ.get("REVIEW_DRY_RUN"))
+    try:
+        cost_policy = CostPolicy(
+            hard_limit_usd=os.environ.get("REVIEW_MAX_COST_USD", "1.00"),
+            max_requests_per_pr=int(os.environ.get("REVIEW_MAX_REQUESTS", "12")),
+            max_completion_tokens_per_call=int(
+                os.environ.get("REVIEW_MAX_COMPLETION_TOKENS", "4096")
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        logger.error("Invalid trusted review cost policy: %s", exc)
+        return 2
 
     github_client = GitHubClient(token=token)
     if model_env:
@@ -85,7 +117,9 @@ async def main() -> int:
             config_path=config_path,
             model_override=model_override,
             dry_run=dry_run,
+            cost_policy=cost_policy,
         )
+        _write_review_summary(result)
         return 0 if result.spec_gate_passed else 1
     except ReviewInfraError as exc:
         logger.error(

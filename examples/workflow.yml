@@ -19,5 +19,5 @@ jobs:
         with:
           openai-key: ${{ secrets.OPENAI_API_KEY }}
           # github-token defaults to ${{ github.token }}
-          # model: gpt-5.4-mini    # optional — overrides config.review.model
+          # model: gpt-5.6-terra   # optional — overrides config.review.model
           # config-path: .github/review-bot.yml   # optional

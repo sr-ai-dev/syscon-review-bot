@@ -61,6 +61,8 @@ jobs:
    - 그 외(`security`/`smell`/`complexity`)만 발견 → `✅ Approved` 유지, 본문에 참고 지적으로 표시
 7. **이전 봇 리뷰·사람 코멘트 참고**: 이전 커밋에서 봇이 남긴 리뷰는 재출력하지 않도록 신규/변경분만 보고하며, 마지막 봇 리뷰 이후 작성된 사람 코멘트(일반·라인)를 함께 읽어 "의도/거부" 등 의사를 반영합니다.
 
+변경량이 1,200 가중 라인·40파일·40k tokens 중 하나를 넘으면 내부 병렬 리뷰로 전환합니다. 2,500 가중 라인·80파일·100k tokens 중 하나를 넘거나 전체 patch를 확보하지 못하면 코드 리뷰 대신 PR 분할 요청 하나를 남깁니다. 단일·병렬 방식 모두 최종 GitHub 리뷰는 하나만 게시합니다.
+
 리뷰 본문은 `스펙 문서 검토`를 가장 먼저 표시하고, 각 finding의 `신뢰도`는 항목 마지막 줄에 함께 표시합니다.
 
 스펙 파일 변경을 PR 리뷰 실행 조건으로 강제하려면 `.github/review-bot.yml`에서 `require_spec_files: true`를 설정합니다. 기본값은 `false`입니다.
@@ -71,9 +73,21 @@ jobs:
 
 ```yaml
 review:
-  model: gpt-5.4-mini    # 옵션 — 미설정 시 액션 input의 model 사용
+  model: gpt-5.6-terra   # 옵션 — 미설정 시 액션 input → GPTClient 기본값 순으로 사용
+
+# 기본값: repository tools 활성, 별도 reasoning effort 없음.
+# reasoning_effort: high # 설정하면 현재 Chat Completions 경로에서 repository tools가 비활성화됨
+max_tool_iterations: 2  # 기본값. 높이면 preflight 비용 상한으로 리뷰가 중단될 수 있음
 
 require_spec_files: false # 옵션 — true면 spec/<기능명>/ 문서 요건 미충족 시 리뷰 차단
+
+# Action의 trusted 비용 상한보다 낮추는 것만 가능. 높은 값은 적용되지 않음.
+cost_control:
+  hard_limit_usd: "0.50"
+  max_requests_per_pr: 8
+  max_completion_tokens_per_call: 2048
+  max_tool_result_tokens_per_call: 2048
+  max_history_tokens: 6000
 
 ignore:                  # 정합성 검토 대상에서 제외할 파일
   files: ["*.lock", "dist/**", "**/*.generated.*"]
@@ -87,8 +101,11 @@ ignore:                  # 정합성 검토 대상에서 제외할 파일
 |------|----------|---------|-------------|
 | `openai-key` | yes | — | OpenAI API key |
 | `github-token` | no | `${{ github.token }}` | API 인증 토큰 (자동) |
-| `model` | no | `''` | 모델 강제 지정 |
+| `model` | no | `''` | 모델 강제 지정 (기본 trusted allowlist는 `gpt-5.6-terra`) |
 | `config-path` | no | `.github/review-bot.yml` | 설정 파일 경로 |
+| `max-review-cost-usd` | no | `1.00` | PR당 비용 hard cap |
+| `max-review-requests` | no | `12` | PR당 OpenAI 요청 상한 |
+| `max-completion-tokens` | no | `4096` | 요청당 출력 토큰 상한 |
 
 ## 로컬 디버깅 (Dry Run)
 
