@@ -178,17 +178,24 @@ async def review_pr(
 
     inventory = filter_files([_inventory_file(item) for item in raw_files], config.ignore)
     parsed = filter_files(files, config.ignore)
-    inventory_by_path = {item.path: item for item in inventory}
-    parsed_by_path = {item.path: item for item in parsed}
+    all_inventory_by_path = {item.path: item for item in inventory}
+    binary_paths = {
+        path for path, item in all_inventory_by_path.items() if item.is_binary
+    }
+    inventory_by_path = {
+        path: item
+        for path, item in all_inventory_by_path.items()
+        if path not in binary_paths
+    }
+    parsed_by_path = {
+        item.path: item for item in parsed if item.path not in binary_paths
+    }
     inventory_paths = set(inventory_by_path)
     parsed_paths = set(parsed_by_path)
     inventory_count_mismatch = (
         isinstance(pr_info.get("changed_files"), int)
         and pr_info["changed_files"] != len(raw_files)
     )
-    binary_paths = {
-        path for path, item in inventory_by_path.items() if item.is_binary
-    }
     path_mismatch = inventory_paths != parsed_paths
     missing_required_patch = any(
         path not in parsed_by_path or not parsed_by_path[path].patch
@@ -207,10 +214,9 @@ async def review_pr(
         or path_mismatch
         or missing_required_patch
         or line_count_mismatch
-        or binary_paths
     ):
         measured_plan = build_review_plan(
-            inventory,
+            list(inventory_by_path.values()),
             policy=size_policy,
             head_sha=head_sha,
             cost_ceiling_nusd=cost_policy.hard_limit_nusd,
@@ -221,7 +227,7 @@ async def review_pr(
             metrics=measured_plan.metrics,
             reason_code=RoutingReasonCode.INCOMPLETE_DIFF,
             coverage=CoverageReport(
-                required_paths=sorted(item.path for item in inventory),
+                required_paths=sorted(inventory_paths),
                 covered_paths=[],
             ),
             cost_ceiling_nusd=cost_policy.hard_limit_nusd,
@@ -240,7 +246,7 @@ async def review_pr(
         )
 
     # Pure renames carry a synthetic metadata patch, so planning, prompts, and
-    # coverage all retain the rename. Binary entries were blocked above.
+    # coverage retain the rename. Binary entries are intentionally ignored.
     files = [
         FileDiff(
             path=path,
@@ -255,39 +261,8 @@ async def review_pr(
     ]
 
     if not files:
-        if not inventory:
-            logger.info("Empty diff, skipping")
-            return ReviewRunResult(Decision.APPROVE)
-
-        measured_plan = build_review_plan(
-            inventory,
-            policy=size_policy,
-            head_sha=head_sha,
-            cost_ceiling_nusd=cost_policy.hard_limit_nusd,
-        )
-        split_plan = ReviewPlan(
-            route=ReviewRoute.SPLIT_REQUEST,
-            head_sha=head_sha,
-            metrics=measured_plan.metrics,
-            reason_code=RoutingReasonCode.INCOMPLETE_DIFF,
-            coverage=CoverageReport(
-                required_paths=sorted(item.path for item in inventory),
-                covered_paths=[],
-            ),
-            cost_ceiling_nusd=cost_policy.hard_limit_nusd,
-        )
-        if not dry_run:
-            await _submit_split_plan(
-                github_client,
-                context,
-                split_plan,
-                size_policy,
-                [RoutingReasonCode.INCOMPLETE_DIFF.value],
-            )
-        return ReviewRunResult(
-            Decision.REQUEST_CHANGES,
-            route=ReviewRoute.SPLIT_REQUEST,
-        )
+        logger.info("No reviewable text diff after ignoring binary files")
+        return ReviewRunResult(Decision.APPROVE)
 
     filtered = filter_files(files, config.ignore)
     if not filtered:

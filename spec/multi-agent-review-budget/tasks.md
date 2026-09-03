@@ -43,7 +43,7 @@
 ## 5. 심층 리뷰 보완
 
 - [x] base SHA 설정 고정과 GitHub 설정 조회 fail-closed를 구현한다.
-- [x] inventory 대비 patch 줄 수와 binary/rename coverage를 검증한다.
+- [x] inventory 대비 patch 줄 수를 검증하고 binary 제외와 rename coverage를 구현한다.
 - [x] reviewer별 전체 manifest와 비용에 반영된 shared context를 제공한다.
 - [x] tool 비활성 전역 검토에도 bounded patch 근거를 제공한다.
 - [x] finding severity와 합성 결과의 모든 의미 필드를 검증한다.

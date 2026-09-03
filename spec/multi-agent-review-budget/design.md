@@ -66,7 +66,7 @@ flowchart TD
 - spec 파일과 과거 review/comment snapshot
 - patch 누락 및 GitHub files API inventory 완전성
 
-필수 production/test/spec 파일의 patch가 없거나 `changed_files`와 가져온 inventory가 다르면 `INCOMPLETE_DIFF`로 분할 요청한다. binary와 rename-only는 별도 상태로 기록하고 patch 누락으로 오판하지 않는다.
+필수 production/test/spec 파일의 patch가 없거나 `changed_files`와 가져온 inventory가 다르면 `INCOMPLETE_DIFF`로 분할 요청한다. binary는 리뷰 대상과 크기 계산에서 제외한다. rename-only는 이전·새 경로 metadata를 text patch로 만들어 coverage에 포함한다.
 
 ### 3.2 크기 측정
 
@@ -305,7 +305,7 @@ prompt 본문, patch, comment, tool 결과, API key, 모델 원문은 기록하�
 - input 순서와 무관한 stable shard 결과
 - 모든 파일 정확히 한 shard 소유
 - 개별 대형 파일과 4-shard packing 실패
-- binary, rename, patch 누락, inventory mismatch
+- binary 제외, rename metadata, patch 누락, inventory mismatch
 - compression에서 dropped path 발생 시 정상 리뷰 금지
 
 ### 비용
