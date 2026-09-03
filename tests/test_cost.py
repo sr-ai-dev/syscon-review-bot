@@ -12,6 +12,7 @@ from src.review.cost import (
     CostPolicy,
     ModelPricing,
     RequestLimitExceeded,
+    ReservationInvariantExceeded,
     UnknownModelPricing,
     calculate_usage_cost_nusd,
     estimate_preflight_nusd,
@@ -214,13 +215,19 @@ async def test_ledger_requires_new_call_id_for_retry_and_known_reservation():
         await ledger.reconcile("missing", 1, 0, 1)
 
 
-async def test_actual_over_reservation_reduces_future_capacity():
+async def test_actual_over_reservation_fails_loudly_after_accounting_spend():
     ledger = CostLedger(CostPolicy(hard_limit_usd="0.001"), GPT_5_6_TERRA_PRICING)
     await ledger.reserve("underestimated", 100_000)
-    await ledger.reconcile("underestimated", 100, 0, 100)
+
+    with pytest.raises(ReservationInvariantExceeded) as raised:
+        await ledger.reconcile("underestimated", 100, 0, 100)
 
     assert ledger.actual_nusd == 1_400_000
+    assert ledger.reserved_nusd == 0
     assert ledger.remaining_nusd == -400_000
+    assert raised.value.reserved_nusd == 100_000
+    assert raised.value.actual_nusd == 1_400_000
+    assert raised.value.accounted_nusd == 1_400_000
     with pytest.raises(CostLimitExceeded):
         await ledger.reserve("next", 1)
 

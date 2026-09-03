@@ -16,6 +16,8 @@ from src.github.pr import (
 )
 from src.github.reviewer import (
     filter_bot_reviews,
+    get_review_author_login,
+    has_review_for_head,
     has_split_request_for_head,
     submit_review,
     submit_spec_gate_review,
@@ -39,6 +41,7 @@ from src.review.hunk_expander import expand_file_diff
 from src.review.compressor import compress_files
 from src.review.judge import run_judge
 from src.review.postprocess import postprocess
+from src.review.errors import ReviewInfraCategory, ReviewInfraError
 from src.spec_check import check_spec_files
 from src.review.tool_executor import GitHubToolExecutor
 from src.review.cost import (
@@ -87,9 +90,11 @@ async def load_repo_config(
 ) -> ReviewConfig:
     try:
         content = await get_repo_file(github_client, repo, config_path, ref)
-    except Exception as e:
-        logger.warning(f"Config fetch failed at {config_path} in {repo}: {e} — using defaults")
-        return DEFAULT_CONFIG
+    except Exception as exc:
+        raise ReviewInfraError(
+            ReviewInfraCategory.GITHUB_TRANSPORT_ERROR,
+            f"Failed to fetch repository review config {config_path} at {ref}",
+        ) from exc
     if content is None:
         logger.info(f"No config file at {config_path} in {repo}, using defaults")
         return DEFAULT_CONFIG
@@ -110,8 +115,14 @@ async def review_pr(
 
     pr_info = await get_pr_info(github_client, context.repo, context.pr_number)
     head_sha = pr_info["head"]["sha"]
+    base_sha = (pr_info.get("base") or {}).get("sha")
+    if not isinstance(base_sha, str) or not base_sha:
+        raise ReviewInfraError(
+            ReviewInfraCategory.GITHUB_RESPONSE_ERROR,
+            "Pull request response omitted base.sha",
+        )
     config = await load_repo_config(
-        github_client, context.repo, head_sha, config_path
+        github_client, context.repo, base_sha, config_path
     )
     cost_policy = cost_policy or CostPolicy()
     cost_policy = cost_policy.restricted_by(config.cost_control)
@@ -144,8 +155,24 @@ async def review_pr(
         if not spec_result.ok:
             logger.info(f"Spec gate failed: {spec_result.message}")
             await _assert_head_unchanged(github_client, context, head_sha)
+            reviews = await get_pr_reviews(
+                github_client, context.repo, context.pr_number
+            )
+            bot_reviews = filter_bot_reviews(reviews)
+            if has_review_for_head(bot_reviews, head_sha, "spec-gate"):
+                logger.info(
+                    "Spec gate review already exists for %s#%s at %s",
+                    context.repo,
+                    context.pr_number,
+                    head_sha,
+                )
+                return ReviewRunResult(Decision.REQUEST_CHANGES, spec_gate_passed=False)
             await submit_spec_gate_review(
-                github_client, context.repo, context.pr_number, spec_result.message
+                github_client,
+                context.repo,
+                context.pr_number,
+                spec_result.message,
+                head_sha,
             )
             return ReviewRunResult(Decision.REQUEST_CHANGES, spec_gate_passed=False)
 
@@ -153,24 +180,35 @@ async def review_pr(
     parsed = filter_files(files, config.ignore)
     inventory_by_path = {item.path: item for item in inventory}
     parsed_by_path = {item.path: item for item in parsed}
-    optional_patch_paths = {
-        item["filename"]
-        for item in raw_files
-        if _patch_is_optional(item)
-    }
     inventory_paths = set(inventory_by_path)
     parsed_paths = set(parsed_by_path)
     inventory_count_mismatch = (
         isinstance(pr_info.get("changed_files"), int)
         and pr_info["changed_files"] != len(raw_files)
     )
-    path_mismatch = inventory_paths != parsed_paths | (inventory_paths & optional_patch_paths)
+    binary_paths = {
+        path for path, item in inventory_by_path.items() if item.is_binary
+    }
+    path_mismatch = inventory_paths != parsed_paths
     missing_required_patch = any(
-        path not in optional_patch_paths
-        and (path not in parsed_by_path or not parsed_by_path[path].patch)
+        path not in parsed_by_path or not parsed_by_path[path].patch
         for path in inventory_paths
     )
-    if inventory_count_mismatch or path_mismatch or missing_required_patch:
+    line_count_mismatch = any(
+        path in parsed_by_path
+        and (
+            parsed_by_path[path].additions != inventory_by_path[path].additions
+            or parsed_by_path[path].deletions != inventory_by_path[path].deletions
+        )
+        for path in inventory_paths
+    )
+    if (
+        inventory_count_mismatch
+        or path_mismatch
+        or missing_required_patch
+        or line_count_mismatch
+        or binary_paths
+    ):
         measured_plan = build_review_plan(
             inventory,
             policy=size_policy,
@@ -201,8 +239,8 @@ async def review_pr(
             route=ReviewRoute.SPLIT_REQUEST,
         )
 
-    # Binary and pure rename entries remain in the inventory check, but have no
-    # textual patch to send to the model. API line counts remain authoritative.
+    # Pure renames carry a synthetic metadata patch, so planning, prompts, and
+    # coverage all retain the rename. Binary entries were blocked above.
     files = [
         FileDiff(
             path=path,
@@ -213,7 +251,7 @@ async def review_pr(
             previous_path=inventory_by_path[path].previous_path,
             is_binary=parsed_by_path[path].is_binary,
         )
-        for path in sorted(inventory_paths - optional_patch_paths)
+        for path in sorted(inventory_paths)
     ]
 
     if not files:
@@ -291,10 +329,21 @@ async def review_pr(
 
     raw_reviews = await get_pr_reviews(github_client, context.repo, context.pr_number)
     bot_reviews = filter_bot_reviews(raw_reviews)
+    if has_review_for_head(bot_reviews, head_sha, "normal"):
+        logger.info(
+            "Normal review already exists for %s#%s at %s",
+            context.repo,
+            context.pr_number,
+            head_sha,
+        )
+        return ReviewRunResult(
+            _decision_from_existing_review(bot_reviews, head_sha),
+            route=plan.route,
+        )
     bot_logins: set[str] = {
-        (r.get("user") or {}).get("login")
+        login
         for r in bot_reviews
-        if (r.get("user") or {}).get("login")
+        if (login := get_review_author_login(r)) is not None
     }
 
     issue_comments_raw = await get_pr_issue_comments(
@@ -381,7 +430,21 @@ async def review_pr(
 
     decision = compute_decision(result)
     await _assert_head_unchanged(github_client, context, head_sha)
-    await submit_review(github_client, context.repo, context.pr_number, result)
+    latest_reviews = await get_pr_reviews(
+        github_client, context.repo, context.pr_number
+    )
+    latest_bot_reviews = filter_bot_reviews(latest_reviews)
+    if has_review_for_head(latest_bot_reviews, head_sha, "normal"):
+        logger.info(
+            "Normal review was submitted concurrently for %s#%s at %s",
+            context.repo,
+            context.pr_number,
+            head_sha,
+        )
+    else:
+        await submit_review(
+            github_client, context.repo, context.pr_number, result, head_sha
+        )
     logger.info(
         f"Submitted review for {context.repo}#{context.pr_number}: "
         f"spec_status={result.spec_status.value}, aligned={result.aligned}, "
@@ -405,7 +468,8 @@ async def _submit_split_plan(
     reviews = await get_pr_reviews(
         github_client, context.repo, context.pr_number
     )
-    if has_split_request_for_head(reviews, plan.head_sha):
+    bot_reviews = filter_bot_reviews(reviews)
+    if has_split_request_for_head(bot_reviews, plan.head_sha):
         logger.info(
             "Split request already exists for %s#%s at %s",
             context.repo,
@@ -457,14 +521,6 @@ def _inventory_file(item: dict) -> FileDiff:
     )
 
 
-def _patch_is_optional(item: dict) -> bool:
-    if item.get("patch"):
-        return False
-    additions = item.get("additions", 0)
-    deletions = item.get("deletions", 0)
-    return additions == 0 and deletions == 0
-
-
 async def _fetch_and_expand(github_client, repo, head_sha, f, max_lines):
     """Fetch file content and expand hunks, with error tolerance."""
     try:
@@ -484,6 +540,18 @@ async def _expand_files(github_client, repo, head_sha, files, max_lines):
         for f in files
     ]
     return await asyncio.gather(*tasks)
+
+
+def _decision_from_existing_review(reviews: list[dict], head_sha: str) -> Decision:
+    for review in reviews:
+        body = review.get("body") or ""
+        if has_review_for_head([review], head_sha, "normal"):
+            return (
+                Decision.REQUEST_CHANGES
+                if "### 판정: ❌" in body
+                else Decision.APPROVE
+            )
+    return Decision.APPROVE
 
 
 def _build_conversation_history(

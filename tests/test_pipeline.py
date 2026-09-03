@@ -5,13 +5,24 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.models.review import Mismatch, ReviewResult, SpecStatus
-from src.models.review_pipeline import ReviewPartial, ReviewRoute, ScopedFinding
+from src.models.review_pipeline import (
+    CoverageReport,
+    ReviewPartial,
+    ReviewPlan,
+    ReviewRoute,
+    ReviewSizeMetrics,
+    ReviewUnit,
+    RoutingReasonCode,
+    ScopedFinding,
+)
 from src.review.cost import CostPolicy
 from src.review.diff_parser import FileDiff
 from src.review.pipeline import (
     PreflightCostExceeded,
     _validate_synthesis_result,
+    _request_envelopes,
     reduce_review_results,
+    reduce_review_partials,
     run_review_pipeline,
 )
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
@@ -129,6 +140,77 @@ def test_synthesis_rejects_duplicate_finding():
 
     with pytest.raises(ReviewInfraError, match="changed the reviewed finding set"):
         _validate_synthesis_result(result, partial)
+
+
+def test_synthesis_rejects_prior_resolved_mutation():
+    partial = _partial("reduced", ["a.py"])
+    partial.prior_resolved = ["old issue → exact fix"]
+    result = _result("final")
+    result.prior_resolved = ["old issue → rewritten fix"]
+
+    with pytest.raises(ReviewInfraError, match="prior_resolved"):
+        _validate_synthesis_result(result, partial)
+
+
+def test_partial_reducer_prefers_higher_severity_before_confidence():
+    low = _partial("one", ["a.py"])
+    low.findings = [
+        ScopedFinding(
+            category="bug",
+            severity="low",
+            file="a.py",
+            line=1,
+            description="same issue",
+            suggestion="low",
+            confidence=100,
+        )
+    ]
+    critical = _partial("two", ["a.py"])
+    critical.findings = [
+        ScopedFinding(
+            category="bug",
+            severity="critical",
+            file="a.py",
+            line=1,
+            description="same issue",
+            suggestion="critical",
+            confidence=70,
+        )
+    ]
+
+    reduced = reduce_review_partials([low, critical], ["a.py"])
+
+    assert reduced.findings[0].severity.value == "critical"
+    assert reduced.findings[0].suggestion == "critical"
+
+
+def test_preflight_envelope_includes_schema_messages_and_tool_definition():
+    plain = _request_envelopes(
+        [("system", "user")],
+        model="gpt-5.6-terra",
+        output_cap=100,
+        tool_turns=1,
+        tool_result_cap=50,
+        use_tools=False,
+        reasoning_effort=None,
+        include_synthesis=False,
+        synthesis_paths=["a.py"],
+    )
+    with_tools = _request_envelopes(
+        [("system", "user")],
+        model="gpt-5.6-terra",
+        output_cap=100,
+        tool_turns=2,
+        tool_result_cap=50,
+        use_tools=True,
+        reasoning_effort=None,
+        include_synthesis=False,
+        synthesis_paths=["a.py"],
+    )
+
+    assert plain[0][0] > 100
+    assert with_tools[0][0] > plain[0][0]
+    assert with_tools[1][0] == with_tools[0][0] + 100 + 50 + 128
 
 
 def test_reducer_deduplicates_by_location_and_keeps_highest_confidence():
@@ -253,6 +335,114 @@ async def test_multi_pipeline_includes_planned_shared_context_in_every_shard_pro
 
     assert len(shard_prompts) == len(plan.units)
     assert all("shared-root-setting" in prompt for prompt in shard_prompts.values())
+
+
+@pytest.mark.asyncio
+async def test_multi_prompts_use_only_planned_context_and_include_full_manifest():
+    files = [
+        FileDiff(
+            path="docs/component/notes.md",
+            patch="@@ -0,0 +1 @@\n+private-doc-patch\n",
+            additions=1,
+            deletions=0,
+        ),
+        FileDiff(
+            path="services/a/module.py",
+            patch="@@ -1 +1 @@\n-old-a\n+new-a\n",
+            additions=1,
+            deletions=1,
+        ),
+    ]
+    paths = [item.path for item in files]
+    metrics = ReviewSizeMetrics(
+        effective_lines=3,
+        effective_files=2,
+        effective_tokens=20,
+        raw_files=2,
+        raw_tokens=20,
+    )
+    plan = ReviewPlan(
+        route=ReviewRoute.MULTI,
+        metrics=metrics,
+        reason_code=RoutingReasonCode.REQUIRES_MULTI_REVIEW,
+        units=[
+            ReviewUnit(unit_id="docs", paths=[paths[0]], effective_tokens=10),
+            ReviewUnit(unit_id="code", paths=[paths[1]], effective_tokens=10),
+        ],
+        coverage=CoverageReport(required_paths=paths, covered_paths=paths),
+    )
+    shard_prompts: dict[str, str] = {}
+
+    async def review(system_prompt, user_prompt, **kwargs):
+        stage = kwargs["cost_stage"]
+        if stage == "synthesis":
+            return _result("final")
+        index = int(stage.split("-")[-1])
+        if index <= len(plan.units):
+            unit = plan.units[index - 1]
+            shard_prompts[unit.unit_id] = user_prompt
+            return _partial(unit.unit_id, unit.paths)
+        return _partial("global", paths)
+
+    await run_review_pipeline(
+        plan=plan,
+        files=files,
+        gpt_client=type("FakeGPT", (), {"review": staticmethod(review)})(),
+        system_prompt="system",
+        pr_title="title",
+        pr_body="body",
+        base_branch="develop",
+        head_branch="bugfix/develop/prompts",
+        model="gpt-5.6-terra",
+        cost_policy=CostPolicy(hard_limit_usd="1"),
+        max_tool_iterations=1,
+    )
+
+    assert all(path in prompt for prompt in shard_prompts.values() for path in paths)
+    assert "private-doc-patch" in shard_prompts["docs"]
+    assert "private-doc-patch" not in shard_prompts["code"]
+
+
+@pytest.mark.asyncio
+async def test_global_reviewer_receives_bounded_patch_without_tools_in_reasoning_mode():
+    files = _files(2)
+    plan = build_review_plan(
+        files,
+        policy=SizeRoutingPolicy(single_max_tokens=1, max_tokens_per_shard=30_000),
+        token_counter=len,
+    )
+    global_prompt = ""
+
+    async def review(system_prompt, user_prompt, **kwargs):
+        nonlocal global_prompt
+        stage = kwargs["cost_stage"]
+        if stage == "synthesis":
+            return _result("final")
+        index = int(stage.split("-")[-1])
+        if index <= len(plan.units):
+            unit = plan.units[index - 1]
+            return _partial(unit.unit_id, unit.paths)
+        global_prompt = user_prompt
+        return _partial("global", plan.coverage.required_paths)
+
+    await run_review_pipeline(
+        plan=plan,
+        files=files,
+        gpt_client=type("FakeGPT", (), {"review": staticmethod(review)})(),
+        system_prompt="system",
+        pr_title="title",
+        pr_body="body",
+        base_branch="develop",
+        head_branch="bugfix/develop/global-patch",
+        model="gpt-5.6-terra",
+        cost_policy=CostPolicy(hard_limit_usd="1"),
+        tool_executor=AsyncMock(),
+        reasoning_effort="high",
+        max_tool_iterations=8,
+    )
+
+    assert "## 전역 변경 patch" in global_prompt
+    assert "+new" in global_prompt
 
 
 @pytest.mark.asyncio

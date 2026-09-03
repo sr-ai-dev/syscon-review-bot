@@ -57,7 +57,7 @@ class TestParseDiff:
         assert files[0].path == "spec/new-기.md"
         assert files[0].previous_path == "spec/old-기.md"
         assert files[0].status == "renamed"
-        assert files[0].patch == ""
+        assert files[0].patch == "rename from spec/old-기.md\nrename to spec/new-기.md"
 
     def test_marks_binary_diff_without_treating_it_as_text_patch(self):
         files = parse_diff(
@@ -67,6 +67,17 @@ class TestParseDiff:
 
         assert files[0].is_binary is True
         assert files[0].patch == ""
+
+    def test_counts_content_lines_that_begin_with_multiple_signs(self):
+        files = parse_diff(
+            "diff --git a/a.txt b/a.txt\n"
+            "@@ -1 +1 @@\n"
+            "---removed content\n"
+            "+++added content\n"
+        )
+
+        assert files[0].additions == 1
+        assert files[0].deletions == 1
 
 
 class TestFilterFiles:
@@ -122,6 +133,22 @@ class TestParsePrFiles:
 
     def test_empty_input(self):
         assert parse_pr_files([]) == []
+
+    def test_preserves_pure_rename_as_metadata_patch(self):
+        files = parse_pr_files([
+            {
+                "filename": "new.py",
+                "previous_filename": "old.py",
+                "patch": None,
+                "additions": 0,
+                "deletions": 0,
+                "status": "renamed",
+            }
+        ])
+
+        assert files[0].path == "new.py"
+        assert files[0].previous_path == "old.py"
+        assert files[0].patch == "rename from old.py\nrename to new.py"
 
     def test_removed_files_included(self):
         raw = [

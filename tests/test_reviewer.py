@@ -8,7 +8,9 @@ from src.github.reviewer import (
     filter_bot_reviews,
     format_split_request_body,
     format_review_body,
+    has_review_for_head,
     has_split_request_for_head,
+    submit_spec_gate_review,
     submit_split_request,
     submit_review,
 )
@@ -309,17 +311,37 @@ class TestFormatReviewBodyPriorResolved:
 
 
 class TestFilterBotReviews:
-    def test_keeps_only_marker(self):
+    def test_requires_marker_and_github_actions_identity(self):
         raw = [
-            {"body": f"{BOT_REVIEW_MARKER}\nfoo"},
-            {"body": "looks good"},
-            {"body": f"{BOT_REVIEW_MARKER}\nbar"},
+            {
+                "body": f"{BOT_REVIEW_MARKER}\nfoo",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            },
+            {
+                "body": "looks good",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            },
+            {
+                "body": f"{BOT_REVIEW_MARKER}\nspoof",
+                "user": {"login": "alice", "type": "User"},
+            },
         ]
-        assert len(filter_bot_reviews(raw)) == 2
+        assert filter_bot_reviews(raw) == [raw[0]]
 
     def test_filter_matches_real_body(self):
         body = format_review_body(_result_aligned())
-        assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
+        review = {
+            "body": body,
+            "author": {"login": "GitHub-Actions", "type": "Bot"},
+        }
+        assert filter_bot_reviews([review]) == [review]
+
+    def test_accepts_official_github_actions_user_id_variant(self):
+        review = {
+            "body": f"{BOT_REVIEW_MARKER}\nfoo",
+            "user": {"id": 41_898_282},
+        }
+        assert filter_bot_reviews([review]) == [review]
 
 
 def test_mismatch_renders_confidence_inside_item():
@@ -360,9 +382,11 @@ class TestSubmitReview:
         ]:
             client = AsyncMock()
             client.post = AsyncMock(return_value={"id": 1})
-            await submit_review(client, "owner/repo", 1, result)
+            await submit_review(client, "owner/repo", 1, result, "deadbeef")
             payload = client.post.call_args.kwargs["json_data"]
             assert payload["event"] == "COMMENT"
+            assert payload["commit_id"] == "deadbeef"
+            assert "kind=normal head_sha=deadbeef" in payload["body"]
             assert label in payload["body"]
 
     @pytest.mark.asyncio
@@ -375,7 +399,7 @@ class TestSubmitReview:
         )
 
         with pytest.raises(ReviewInfraError):
-            await submit_review(client, "owner/repo", 1, result)
+            await submit_review(client, "owner/repo", 1, result, "deadbeef")
 
         client.post.assert_not_awaited()
 
@@ -414,12 +438,39 @@ class TestSplitRequest:
                 "body": (
                     "## 🤖 AI 리뷰\n"
                     "<!-- syscon-review-bot:split-request head_sha=abc123 -->"
-                )
+                ),
+                "user": {"login": "github-actions[bot]"},
             },
         ]
 
         assert has_split_request_for_head(reviews, "abc123") is True
         assert has_split_request_for_head(reviews, "def456") is False
+
+    def test_detects_review_kind_only_for_same_head(self):
+        reviews = [{
+            "body": (
+                "## 🤖 AI 리뷰\n"
+                "<!-- syscon-review-bot:review kind=normal head_sha=abc123 -->"
+            ),
+            "author": {"login": "github-actions[bot]"},
+        }]
+
+        assert has_review_for_head(reviews, "abc123", "normal") is True
+        assert has_review_for_head(reviews, "abc123", "spec-gate") is False
+        assert has_review_for_head(reviews, "def456", "normal") is False
+
+    def test_human_copied_markers_do_not_satisfy_idempotency(self):
+        reviews = [{
+            "body": (
+                "## 🤖 AI 리뷰\n"
+                "<!-- syscon-review-bot:split-request head_sha=abc123 -->\n"
+                "<!-- syscon-review-bot:review kind=normal head_sha=abc123 -->"
+            ),
+            "user": {"login": "alice", "type": "User"},
+        }]
+
+        assert has_split_request_for_head(reviews, "abc123") is False
+        assert has_review_for_head(reviews, "abc123", "normal") is False
 
     def test_formats_deterministic_policy_only_body(self):
         kwargs = {
@@ -510,5 +561,26 @@ class TestSplitRequest:
         assert client.post.call_args.args == ("/repos/owner/repo/pulls/7/reviews",)
         payload = client.post.call_args.kwargs["json_data"]
         assert payload["event"] == "COMMENT"
+        assert payload["commit_id"] == "abc123"
         assert "COST_PREFLIGHT_EXCEEDED" in payload["body"]
         assert "abc123" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_review_binds_snapshot_and_escapes_reason():
+    client = AsyncMock()
+    client.post = AsyncMock(return_value={"id": 1})
+
+    await submit_spec_gate_review(
+        client,
+        "owner/repo",
+        7,
+        "missing\n### injected <details>",
+        "abc123",
+    )
+
+    payload = client.post.call_args.kwargs["json_data"]
+    assert payload["commit_id"] == "abc123"
+    assert "kind=spec-gate head_sha=abc123" in payload["body"]
+    assert "\n### injected" not in payload["body"]
+    assert "<details>" not in payload["body"]

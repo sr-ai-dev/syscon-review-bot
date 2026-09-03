@@ -71,8 +71,8 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
         patch_start = file_diff.find("@@")
         patch = file_diff[patch_start:] if patch_start != -1 else ""
 
-        additions = len(re.findall(r"^\+[^+]", patch, re.MULTILINE))
-        deletions = len(re.findall(r"^-[^-]", patch, re.MULTILINE))
+        additions = sum(line.startswith("+") for line in patch.splitlines())
+        deletions = sum(line.startswith("-") for line in patch.splitlines())
 
         is_renamed = bool(re.search(r"^rename (?:from|to) ", file_diff, re.MULTILINE))
         if re.search(r"^new file mode ", file_diff, re.MULTILINE):
@@ -83,6 +83,15 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
             status = "renamed"
         else:
             status = "modified"
+
+        if is_renamed and not patch:
+            rename_from = re.search(r'^rename from (.+)$', file_diff, re.MULTILINE)
+            rename_to = re.search(r'^rename to (.+)$', file_diff, re.MULTILINE)
+            if rename_from and rename_to:
+                patch = (
+                    f"rename from {_decode_git_path(rename_from.group(1))}\n"
+                    f"rename to {_decode_git_path(rename_to.group(1))}"
+                )
 
         files.append(FileDiff(
             path=path,
@@ -101,6 +110,10 @@ def parse_pr_files(raw: list[dict]) -> list[FileDiff]:
     files: list[FileDiff] = []
     for item in raw:
         patch = item.get("patch")
+        if not patch and item.get("status") == "renamed":
+            previous_path = item.get("previous_filename")
+            if previous_path:
+                patch = f"rename from {previous_path}\nrename to {item['filename']}"
         if not patch:
             continue
         files.append(FileDiff(

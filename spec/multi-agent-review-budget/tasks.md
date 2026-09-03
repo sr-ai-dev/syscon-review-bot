@@ -39,3 +39,13 @@
 - [x] 민감한 prompt/diff/tool/model 원문이 로그에 없는지 검증한다.
 - [x] 전체 테스트를 실행한다.
 - [ ] shadow mode로 2주간 metrics를 수집한 뒤 threshold를 보정한다.
+
+## 5. 심층 리뷰 보완
+
+- [x] base SHA 설정 고정과 GitHub 설정 조회 fail-closed를 구현한다.
+- [x] inventory 대비 patch 줄 수와 binary/rename coverage를 검증한다.
+- [x] reviewer별 전체 manifest와 비용에 반영된 shared context를 제공한다.
+- [x] tool 비활성 전역 검토에도 bounded patch 근거를 제공한다.
+- [x] finding severity와 합성 결과의 모든 의미 필드를 검증한다.
+- [x] review `commit_id`, bot 작성자 검증, 동일 SHA 중복 방지를 구현한다.
+- [x] 심층 리뷰 회귀 테스트와 전체 테스트를 실행한다.

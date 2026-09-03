@@ -107,6 +107,8 @@ LLM planner는 비용과 비결정성을 늘리므로 사용하지 않는다.
 5. stable first-fit-decreasing 방식으로 최대 4개 shard에 배치한다.
 6. 모든 파일은 정확히 한 shard가 소유한다. 전체 file manifest는 모든 reviewer가 받는다.
 
+shared context의 raw token은 모든 shard 입력 한도에 반복 반영한다. 전역 reviewer는 tool 사용 여부와 관계없이 전체 파일에 공정 배분한 bounded patch를 받아 교차 파일 판단의 최소 근거를 확보한다.
+
 각 shard는 자기 patch를 상세 검토하고, 관련 파일이 필요하면 SHA에 고정된 `read_file`/`grep`을 사용한다. 별도 전역 reviewer는 spec 일관성, 모듈 경계, API 호환성, transaction, 권한, 동시성, 이전 리뷰 상태를 검토한다.
 
 ### 3.4 내부 결과와 통합
@@ -180,6 +182,8 @@ cost_control:
 
 PR 설정과 trusted policy가 모두 있으면 각 제한의 더 작은 값을 적용한다. PR 설정은 `enabled=false`, 가격 변경, allowlist 확장, 상한 증가를 할 수 없다.
 
+리뷰 설정은 PR head가 아니라 base commit의 SHA에서 읽는다. 현재 PR은 자기 리뷰의 도구 사용, reasoning, spec gate 또는 비용 정책을 변경할 수 없다. 설정 파일이 없다는 404만 기본값을 사용하며, 인증·통신·서버 오류는 인프라 오류로 종료한다.
+
 ### 4.3 실행 계획과 preflight
 
 첫 API 호출 전에 exact execution plan을 만든다.
@@ -243,6 +247,8 @@ usage가 없는 실패는 예약액 전체를 `usage_unknown`으로 유지한다
 ```
 
 한 workflow run에서 publish 함수 호출은 최대 한 번이다. GitHub POST API에는 idempotency key가 없으므로 네트워크 응답 유실이나 workflow 재실행까지 포함한 절대적인 exactly-once는 보장할 수 없다. `head_sha`가 포함된 숨김 marker를 사용해 동일 SHA의 중복 게시를 best-effort로 방지한다.
+
+모든 review POST는 snapshot SHA를 `commit_id`로 지정한다. 중복 검사는 marker뿐 아니라 GitHub Actions bot 작성자도 확인하며, reviews 목록 전체를 pagination해 조회한다.
 
 ## 6. 오류 모델
 
@@ -334,4 +340,3 @@ prompt 본문, patch, comment, tool 결과, API key, 모델 원문은 기록하�
 6. 측정 후 routing과 split enforcement를 활성화한다.
 
 Shadow mode에서도 비용 hard limit은 적용한다. Shadow mode는 size route 결과만 게시 동작에 반영하지 않는다.
-

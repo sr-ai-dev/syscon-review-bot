@@ -62,7 +62,7 @@ def test_one_over_single_boundary_routes_multi():
     assert len(plan.units) == 2
 
 
-def test_raw_tokens_route_docs_even_when_weighted_tokens_fit_single():
+def test_raw_tokens_reject_docs_over_per_file_cap_even_when_weighted_tokens_fit():
     plan = build_review_plan(
         [fd("docs/large.md", additions=1, patch="x")],
         token_counter=lambda _: 40_001,
@@ -70,7 +70,8 @@ def test_raw_tokens_route_docs_even_when_weighted_tokens_fit_single():
 
     assert plan.metrics.effective_tokens == math.ceil(40_001 * 0.35)
     assert plan.metrics.raw_tokens == 40_001
-    assert plan.route is ReviewRoute.MULTI
+    assert plan.route is ReviewRoute.SPLIT_REQUEST
+    assert plan.reason_code is RoutingReasonCode.UNPACKABLE_CHANGE
 
 
 def test_multi_exact_boundaries_are_allowed():
@@ -109,6 +110,68 @@ def test_one_over_each_multi_boundary_requests_split():
 def test_single_file_over_shard_cap_is_unpackable():
     policy = SizeRoutingPolicy(single_max_tokens=10, max_tokens_per_shard=30_000)
     plan = build_review_plan([fd("a.py", patch="x")], policy=policy, token_counter=lambda _: 30_001)
+
+    assert plan.route is ReviewRoute.SPLIT_REQUEST
+    assert plan.reason_code is RoutingReasonCode.UNPACKABLE_CHANGE
+
+
+def test_weighted_document_cannot_bypass_raw_per_file_shard_cap():
+    policy = SizeRoutingPolicy(single_max_tokens=10, max_tokens_per_shard=30_000)
+
+    plan = build_review_plan(
+        [fd("docs/large.md", patch="x")],
+        policy=policy,
+        token_counter=lambda _: 30_001,
+    )
+
+    assert plan.route is ReviewRoute.SPLIT_REQUEST
+    assert plan.reason_code is RoutingReasonCode.UNPACKABLE_CHANGE
+
+
+def test_shared_context_consumes_every_shard_capacity():
+    policy = SizeRoutingPolicy(single_max_tokens=1, max_tokens_per_shard=30_000)
+    files = [
+        fd("README.md", patch="shared"),
+        fd("apps/api/main.py", patch="api"),
+        fd("apps/web/main.py", patch="web"),
+    ]
+    token_sizes = {"shared": 10_000, "api": 20_001, "web": 1}
+
+    plan = build_review_plan(
+        files, policy=policy, token_counter=token_sizes.__getitem__
+    )
+
+    assert plan.route is ReviewRoute.SPLIT_REQUEST
+    assert plan.reason_code is RoutingReasonCode.UNPACKABLE_CHANGE
+
+
+def test_nested_shared_document_is_budgeted_and_listed_for_every_shard():
+    policy = SizeRoutingPolicy(single_max_tokens=1, max_tokens_per_shard=30_000)
+    files = [
+        fd("docs/architecture.md", patch="shared"),
+        fd("apps/api/main.py", patch="api"),
+        fd("apps/web/main.py", patch="web"),
+    ]
+    token_sizes = {"shared": 5_000, "api": 20_000, "web": 20_000}
+
+    plan = build_review_plan(
+        files, policy=policy, token_counter=token_sizes.__getitem__
+    )
+
+    assert plan.route is ReviewRoute.MULTI
+    assert len(plan.units) == 2
+    assert all("docs/architecture.md" in unit.shared_context_paths for unit in plan.units)
+    assert all(unit.effective_tokens == 25_000 for unit in plan.units)
+
+
+def test_multi_route_with_one_indivisible_group_is_unpackable():
+    policy = SizeRoutingPolicy(single_max_effective_lines=1)
+
+    plan = build_review_plan(
+        [fd("apps/api/main.py", additions=2, patch="small")],
+        policy=policy,
+        token_counter=lambda _: 10,
+    )
 
     assert plan.route is ReviewRoute.SPLIT_REQUEST
     assert plan.reason_code is RoutingReasonCode.UNPACKABLE_CHANGE

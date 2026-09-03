@@ -84,11 +84,19 @@ class CoverageReport(BaseModel):
         return [path for path in self.required_paths if path not in covered]
 
 
+class FindingSeverity(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    ADVISORY = "advisory"
+
+
 class ScopedFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     category: str
-    severity: str
+    severity: FindingSeverity
     description: str
     suggestion: str
     file: str | None = None

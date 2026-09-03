@@ -113,13 +113,11 @@ def _component_key(path: str) -> str:
     return f"logical/{stem}"
 
 
-def _weighted_file_tokens(changed_file: FileDiff, token_counter: TokenCounter) -> float:
-    # Shard capacity is a scoped effective-token budget. The PR-wide 40k/100k
-    # routing thresholds intentionally use raw_tokens in classify_route().
-    return file_weight(changed_file.path) * token_counter(changed_file.patch)
-
-
-def _make_groups(files: list[FileDiff], token_counter: TokenCounter) -> list[_Group]:
+def _make_groups(
+    files: list[FileDiff],
+    raw_tokens_by_path: dict[str, int],
+    shared_context_paths: set[str],
+) -> list[_Group]:
     grouped: dict[str, list[FileDiff]] = {}
     for changed_file in sorted(files, key=lambda item: item.path):
         grouped.setdefault(_component_key(changed_file.path), []).append(changed_file)
@@ -128,7 +126,14 @@ def _make_groups(files: list[FileDiff], token_counter: TokenCounter) -> list[_Gr
         _Group(
             key=key,
             files=tuple(group_files),
-            effective_tokens=sum(_weighted_file_tokens(item, token_counter) for item in group_files),
+            # Shared patches are present once in every reviewer prompt. Account
+            # for them as a common raw-token baseline instead of discounting or
+            # double-counting them as owned payload here.
+            effective_tokens=sum(
+                file_weight(item.path) * raw_tokens_by_path[item.path]
+                for item in group_files
+                if item.path not in shared_context_paths
+            ),
         )
         for key, group_files in grouped.items()
     ]
@@ -136,18 +141,22 @@ def _make_groups(files: list[FileDiff], token_counter: TokenCounter) -> list[_Gr
 
 
 def _pack_groups(
-    groups: list[_Group], policy: SizeRoutingPolicy
+    groups: list[_Group], policy: SizeRoutingPolicy, shared_context_tokens: int
 ) -> list[list[_Group]] | None:
+    available_payload_tokens = policy.max_tokens_per_shard - shared_context_tokens
+    if available_payload_tokens < 0:
+        return None
+
     bins: list[list[_Group]] = []
     loads: list[float] = []
     for group in groups:
-        if group.effective_tokens > policy.max_tokens_per_shard:
+        if group.effective_tokens > available_payload_tokens:
             return None
         target = next(
             (
                 index
                 for index, load in enumerate(loads)
-                if load + group.effective_tokens <= policy.max_tokens_per_shard
+                if load + group.effective_tokens <= available_payload_tokens
             ),
             None,
         )
@@ -162,9 +171,15 @@ def _pack_groups(
 
     # A MULTI plan should use at least two useful reviewers when independent
     # groups exist, even when its token size alone would fit one shard.
-    if len(bins) == 1 and len(bins[0]) > 1:
-        moved = bins[0].pop()
-        bins.append([moved])
+    if len(bins) == 1:
+        movable = [
+            index
+            for index, group in enumerate(bins[0])
+            if group.effective_tokens > 0
+        ]
+        if len(movable) > 1:
+            moved = bins[0].pop(movable[-1])
+            bins.append([moved])
     return bins
 
 
@@ -176,19 +191,39 @@ def pack_review_units(
 ) -> list[ReviewUnit] | None:
     policy = policy or SizeRoutingPolicy()
     files = list(files)
+    raw_tokens_by_path = {
+        changed_file.path: token_counter(changed_file.patch)
+        for changed_file in files
+    }
+    shared_context_paths = {
+        changed_file.path
+        for changed_file in files
+        if "/" not in changed_file.path
+        or changed_file.path.endswith((".md", ".mdx", ".rst"))
+    }
+    shared_context_tokens = sum(
+        raw_tokens_by_path[path] for path in shared_context_paths
+    )
 
-    # An individual file cannot be divided safely between reviewers.
+    # An individual patch cannot be divided safely between reviewers. This is
+    # a raw-token constraint: file-kind weights must never bypass the cap.
     if any(
-        _weighted_file_tokens(changed_file, token_counter) > policy.max_tokens_per_shard
+        raw_tokens_by_path[changed_file.path] > policy.max_tokens_per_shard
         for changed_file in files
     ):
         return None
 
-    bins = _pack_groups(_make_groups(files, token_counter), policy)
-    if bins is None:
+    bins = _pack_groups(
+        _make_groups(files, raw_tokens_by_path, shared_context_paths),
+        policy,
+        shared_context_tokens,
+    )
+    # The MULTI contract requires 2-4 useful review units. One indivisible
+    # component cannot silently degrade to a one-reviewer MULTI plan.
+    if bins is None or len(bins) < 2:
         return None
 
-    root_context = sorted(changed_file.path for changed_file in files if "/" not in changed_file.path)
+    shared_context = sorted(shared_context_paths)
     units: list[ReviewUnit] = []
     for index, groups in enumerate(bins, start=1):
         owned_files = sorted(
@@ -199,8 +234,11 @@ def pack_review_units(
             ReviewUnit(
                 unit_id=f"shard-{index}",
                 paths=[changed_file.path for changed_file in owned_files],
-                effective_tokens=math.ceil(sum(group.effective_tokens for group in groups)),
-                shared_context_paths=root_context,
+                effective_tokens=math.ceil(
+                    shared_context_tokens
+                    + sum(group.effective_tokens for group in groups)
+                ),
+                shared_context_paths=shared_context,
             )
         )
     return units

@@ -37,6 +37,24 @@ class RequestLimitExceeded(RuntimeError):
         super().__init__(f"request count exceeds policy limit: {max_requests}")
 
 
+class ReservationInvariantExceeded(CostLimitExceeded):
+    """Actual provider usage exceeded the reserved worst-case envelope.
+
+    The request has already been charged, so reconciliation records the actual
+    spend before raising. Callers must stop new work; they cannot undo the
+    overrun by retaining only the smaller reservation.
+    """
+
+    def __init__(self, reserved_nusd: int, actual_nusd: int):
+        self.reserved_nusd = reserved_nusd
+        self.actual_nusd = actual_nusd
+        super().__init__(actual_nusd, reserved_nusd)
+        self.args = (
+            "actual usage exceeded worst-case reservation: "
+            f"actual={actual_nusd} nUSD, reserved={reserved_nusd} nUSD",
+        )
+
+
 def _nonnegative_int(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer")
@@ -402,4 +420,8 @@ class CostLedger:
             self._reservations.pop(call_id)
             self._finalized_call_ids.add(call_id)
             self._actual_nusd += actual
+            if actual > reserved:
+                error = ReservationInvariantExceeded(reserved, actual)
+                error.accounted_nusd = self.actual_nusd + self.usage_unknown_nusd
+                raise error
             return CostReconciliation(call_id, reserved, actual, False)

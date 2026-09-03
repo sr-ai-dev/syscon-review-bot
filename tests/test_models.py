@@ -296,6 +296,18 @@ def test_mismatch_confidence_defaults_to_70():
     assert m.confidence == 70
 
 
+def test_scoped_finding_rejects_unknown_severity():
+    from src.models.review_pipeline import ScopedFinding
+
+    with pytest.raises(ValidationError):
+        ScopedFinding(
+            category="bug",
+            severity="urgent",
+            description="d",
+            suggestion="s",
+        )
+
+
 class TestDecisionEnum:
     def test_two_values(self):
         # GitHub event 이름과 매칭. APPROVE는 정책상 못 보내지만 결정 라벨로는 유지.

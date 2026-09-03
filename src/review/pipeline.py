@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -10,7 +11,13 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from src.models.review import ReviewResult
-from src.models.review_pipeline import ReviewPartial, ReviewPlan, ReviewRoute, ScopedFinding
+from src.models.review_pipeline import (
+    FindingSeverity,
+    ReviewPartial,
+    ReviewPlan,
+    ReviewRoute,
+    ScopedFinding,
+)
 from src.review.cost import (
     CostLedger,
     CostPolicy,
@@ -19,8 +26,14 @@ from src.review.cost import (
 )
 from src.review.diff_parser import FileDiff
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
+from src.review.llm_tools import TOOL_SCHEMAS
+from src.review.judge_prompt import build_judge_system_prompt
 from src.review.prompt_builder import build_user_prompt
-from src.review.token_counter import count_tokens
+from src.review.structured_output import (
+    REVIEW_PARTIAL_RESPONSE_FORMAT,
+    REVIEW_RESPONSE_FORMAT,
+)
+from src.review.token_counter import count_tokens, truncate_tokens
 from src.review.tool_executor import ToolExecutor
 
 
@@ -39,6 +52,9 @@ class PipelineOutcome:
     ledger: CostLedger
 
 
+GLOBAL_PATCH_BUDGET_TOKENS = 8_000
+
+
 def _trim_history(history: list[str] | None, max_tokens: int) -> list[str]:
     kept: list[str] = []
     used = 0
@@ -51,14 +67,19 @@ def _trim_history(history: list[str] | None, max_tokens: int) -> list[str]:
     return list(reversed(kept))
 
 
-def _scoped_prompt(base_prompt: str, unit_id: str, paths: list[str]) -> str:
+def _scoped_prompt(
+    base_prompt: str, unit_id: str, paths: list[str], all_paths: list[str]
+) -> str:
     scope = "\n".join(f"- {path}" for path in paths)
+    manifest = "\n".join(f"- {path}" for path in all_paths)
     return (
         f"## 내부 검토 범위\nunit: {unit_id}\n담당 파일:\n{scope}\n\n"
+        f"## 전체 변경 파일 manifest\n{manifest}\n\n"
         "담당 파일의 상세 결함을 검토하라. 다른 파일은 관계 확인에만 사용하라. "
         f"unit_id는 {unit_id}, covered_paths는 위 담당 파일 전체를 그대로 반환하라. "
         "finding category는 mismatch/spec_doc/architecture/bug/vulnerability/security/"
         "smell/complexity/advisory 중 하나를 사용하라. "
+        "severity는 critical/high/medium/low/advisory 중 하나를 사용하라. "
         "GitHub 게시용 문구를 만들지 말고 ReviewPartial JSON만 반환하라.\n\n"
         f"{base_prompt}"
     )
@@ -71,18 +92,27 @@ def _global_prompt(
     base_branch: str,
     head_branch: str,
     paths: list[str],
+    files: list[FileDiff],
     conversation_history: list[str] | None,
 ) -> str:
     manifest = "\n".join(f"- {path}" for path in paths)
     history = "\n\n".join(conversation_history or [])
+    patch_budget_per_file = max(1, GLOBAL_PATCH_BUDGET_TOKENS // max(1, len(files)))
+    patch_sections = []
+    for changed_file in files:
+        excerpt = truncate_tokens(changed_file.patch, patch_budget_per_file)
+        patch_sections.append(f"### {changed_file.path}\n```diff\n{excerpt}\n```")
+    patches = "\n\n".join(patch_sections)
     return (
         "## 전역 검토\n"
         f"제목: {pr_title}\n설명: {pr_body}\n브랜치: {head_branch} → {base_branch}\n\n"
         f"전체 변경 파일:\n{manifest}\n\n"
+        f"## 전역 변경 patch\n{patches}\n\n"
         "모듈 경계, API/DB 호환성, 권한, transaction, 동시성, 스펙 문서와 이전 리뷰 상태를 검토하라. "
         "unit_id는 global, covered_paths는 전체 변경 파일을 그대로 반환하라. "
         "finding category는 mismatch/spec_doc/architecture/bug/vulnerability/security/"
         "smell/complexity/advisory 중 하나를 사용하라. "
+        "severity는 critical/high/medium/low/advisory 중 하나를 사용하라. "
         "필요한 본문은 read_file/grep으로 확인하라. 근거 없는 finding은 만들지 마라.\n\n"
         f"이전 리뷰와 대화:\n{history}"
     )
@@ -92,14 +122,15 @@ def _synthesis_prompts(results: list[BaseModel], paths: list[str]) -> tuple[str,
     system = (
         "너는 PR 리뷰 통합기다. 입력된 내부 리뷰 결과만 병합하라. "
         "새 finding을 만들거나 기존 finding을 제거·재작성하지 마라. "
-        "file, line, category, description, suggestion, confidence, spec_status, aligned를 "
+        "file, line, category, description, suggestion, confidence, spec_status, aligned, "
+        "prior_resolved의 각 문자열과 배열 순서를 "
         "값과 문자열을 재작성하지 말고 그대로 유지하라. "
         "category mismatch/spec_doc/architecture/advisory는 각 동명 결과 목록으로, "
         "bug/vulnerability/security/smell/complexity는 quality_findings로 옮겨라. "
         "최종 출력은 요구된 ReviewResult JSON schema를 정확히 지켜라. 한국어로 작성하라."
     )
     payload = "\n\n".join(
-        f"### 내부 결과 {index}\n{result.model_dump_json(indent=2)}"
+        f"### 내부 결과 {index}\n{result.model_dump_json()}"
         for index, result in enumerate(results, 1)
     )
     manifest = "\n".join(f"- {path}" for path in paths)
@@ -273,6 +304,11 @@ def _validate_synthesis_result(
             ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
             "Synthesis changed the deterministic review status",
         )
+    if result.prior_resolved != partial.prior_resolved:
+        raise ReviewInfraError(
+            ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+            "Synthesis changed prior_resolved",
+        )
 
 
 def reduce_review_partials(
@@ -280,11 +316,11 @@ def reduce_review_partials(
 ) -> ReviewPartial:
     path_index = {path: index for index, path in enumerate(paths)}
     severity_rank = {
-        "critical": 5,
-        "high": 4,
-        "medium": 3,
-        "low": 2,
-        "advisory": 1,
+        FindingSeverity.CRITICAL: 5,
+        FindingSeverity.HIGH: 4,
+        FindingSeverity.MEDIUM: 3,
+        FindingSeverity.LOW: 2,
+        FindingSeverity.ADVISORY: 1,
     }
     unique: dict[tuple, ScopedFinding] = {}
     for partial in partials:
@@ -296,9 +332,9 @@ def reduce_review_partials(
                 _normalized_description(finding.description),
             )
             current = unique.get(key)
-            score = (severity_rank.get(finding.severity.casefold(), 0), finding.confidence)
+            score = (severity_rank[finding.severity], finding.confidence)
             current_score = (
-                severity_rank.get(current.severity.casefold(), 0),
+                severity_rank[current.severity],
                 current.confidence,
             ) if current is not None else (-1, -1)
             if current is None or score > current_score:
@@ -341,27 +377,101 @@ def reduce_review_partials(
     )
 
 
+def _request_payload_tokens(
+    system: str,
+    user: str,
+    *,
+    model: str,
+    output_cap: int,
+    use_tools: bool,
+    reasoning_effort: str | None,
+    response_format: dict,
+) -> int:
+    payload: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "response_format": response_format,
+        "max_completion_tokens": output_cap,
+    }
+    if use_tools:
+        payload.update(
+            temperature=0.1,
+            tools=TOOL_SCHEMAS,
+            tool_choice="auto",
+            parallel_tool_calls=False,
+        )
+    elif reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
+    else:
+        payload["temperature"] = 0.1
+    return count_tokens(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
 def _request_envelopes(
     prompts: list[tuple[str, str]],
     *,
+    model: str,
     output_cap: int,
     tool_turns: int,
     tool_result_cap: int,
+    use_tools: bool,
+    reasoning_effort: str | None,
     include_synthesis: bool,
+    synthesis_paths: list[str],
+    include_judge: bool = False,
 ) -> list[tuple[int, int]]:
+    response_format = (
+        REVIEW_PARTIAL_RESPONSE_FORMAT if include_synthesis else REVIEW_RESPONSE_FORMAT
+    )
+
     requests: list[tuple[int, int]] = []
     for system, user in prompts:
-        base = count_tokens(system) + count_tokens(user) + 256
+        base = _request_payload_tokens(
+            system,
+            user,
+            model=model,
+            output_cap=output_cap,
+            use_tools=use_tools,
+            reasoning_effort=reasoning_effort,
+            response_format=response_format,
+        )
         for turn in range(tool_turns):
-            growth = turn * (output_cap + tool_result_cap + 128)
+            growth = turn * (output_cap + tool_result_cap + 128) if use_tools else 0
             requests.append((base + growth, output_cap))
     if include_synthesis:
-        synthesis_input = (
-            sum(count_tokens(system) + count_tokens(user) for system, user in prompts)
-            + len(prompts) * output_cap
-            + 512
+        synthesis_system, synthesis_user = _synthesis_prompts([], synthesis_paths)
+        synthesis_input = _request_payload_tokens(
+            synthesis_system,
+            synthesis_user,
+            model=model,
+            output_cap=output_cap,
+            use_tools=False,
+            reasoning_effort=reasoning_effort,
+            response_format=REVIEW_RESPONSE_FORMAT,
         )
+        # Every internal response can contribute to the reduced JSON. Its serialized
+        # payload cannot exceed the combined completion envelopes.
+        synthesis_input += len(prompts) * (output_cap + 128)
         requests.append((synthesis_input, output_cap))
+    if include_judge:
+        judge_input = _request_payload_tokens(
+            build_judge_system_prompt(),
+            "## 1차 리뷰 결과 (JSON)\n\n```json\n\n```\n\n"
+            "위 결과를 시스템 프롬프트의 규칙대로 정리한 JSON을 출력하라.",
+            model=model,
+            output_cap=output_cap,
+            use_tools=False,
+            reasoning_effort=reasoning_effort,
+            response_format=REVIEW_RESPONSE_FORMAT,
+        )
+        # run_judge pretty-prints the first result; reserve twice its completion
+        # envelope for JSON indentation and its message wrapper.
+        requests.append((judge_input + 2 * output_cap, output_cap))
     return requests
 
 
@@ -408,11 +518,6 @@ async def run_review_pipeline(
         tool_turns = max_tool_iterations if use_tools else 1
         include_synthesis = False
     else:
-        shared_docs = [
-            changed_file
-            for changed_file in files
-            if changed_file.path.endswith((".md", ".mdx", ".rst"))
-        ]
         prompts = []
         for unit in plan.units:
             owned = [by_path[path] for path in unit.paths]
@@ -420,7 +525,7 @@ async def run_review_pipeline(
             scoped_files = list(
                 {
                     item.path: item
-                    for item in [*shared_docs, *planned_context, *owned]
+                    for item in [*planned_context, *owned]
                 }.values()
             )
             base_prompt = build_user_prompt(
@@ -431,7 +536,15 @@ async def run_review_pipeline(
                 head_branch=head_branch,
             )
             prompts.append(
-                (system_prompt, _scoped_prompt(base_prompt, unit.unit_id, unit.paths))
+                (
+                    system_prompt,
+                    _scoped_prompt(
+                        base_prompt,
+                        unit.unit_id,
+                        unit.paths,
+                        plan.coverage.required_paths,
+                    ),
+                )
             )
         prompts.append(
             (
@@ -442,6 +555,7 @@ async def run_review_pipeline(
                     base_branch=base_branch,
                     head_branch=head_branch,
                     paths=plan.coverage.required_paths,
+                    files=files,
                     conversation_history=conversation_history,
                 ),
             )
@@ -452,13 +566,16 @@ async def run_review_pipeline(
 
     requests = _request_envelopes(
         prompts,
+        model=model,
         output_cap=output_cap,
         tool_turns=tool_turns,
         tool_result_cap=cost_policy.max_tool_result_tokens_per_call,
+        use_tools=use_tools,
+        reasoning_effort=reasoning_effort,
         include_synthesis=include_synthesis,
+        synthesis_paths=plan.coverage.required_paths,
+        include_judge=include_judge,
     )
-    if include_judge:
-        requests.append((output_cap + 512, output_cap))
     if len(requests) > cost_policy.max_requests_per_pr:
         raise PreflightCostExceeded(cost_policy.hard_limit_nusd + 1, cost_policy.hard_limit_nusd)
     estimate = estimate_preflight_nusd(

@@ -19,17 +19,63 @@ from src.review.errors import ReviewInfraCategory, ReviewInfraError
 
 BOT_REVIEW_MARKER = "## 🤖 AI 리뷰"
 SPLIT_REQUEST_MARKER_PREFIX = "<!-- syscon-review-bot:split-request head_sha="
+REVIEW_MARKER_PREFIX = "<!-- syscon-review-bot:review kind="
 MAX_GITHUB_REVIEW_BODY_CHARS = 60_000
+GITHUB_ACTIONS_BOT_LOGINS = frozenset({"github-actions", "github-actions[bot]"})
+GITHUB_ACTIONS_BOT_USER_ID = 41_898_282
 
 
 def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
-    return [r for r in reviews if BOT_REVIEW_MARKER in (r.get("body") or "")]
+    return [
+        review
+        for review in reviews
+        if BOT_REVIEW_MARKER in (review.get("body") or "")
+        and _is_github_actions_review(review)
+    ]
+
+
+def _is_github_actions_review(review: dict) -> bool:
+    identity = review.get("user") or review.get("author") or {}
+    if not isinstance(identity, dict):
+        return False
+    login = get_review_author_login(review)
+    return (
+        isinstance(login, str)
+        and login.casefold() in GITHUB_ACTIONS_BOT_LOGINS
+    ) or identity.get("id") == GITHUB_ACTIONS_BOT_USER_ID
+
+
+def get_review_author_login(review: dict) -> str | None:
+    identity = review.get("user") or review.get("author") or {}
+    if not isinstance(identity, dict):
+        return None
+    login = identity.get("login")
+    return login if isinstance(login, str) and login else None
 
 
 def has_split_request_for_head(reviews: list[dict], head_sha: str) -> bool:
     safe_sha = "".join(character for character in head_sha if character.isalnum())
     marker = f"{SPLIT_REQUEST_MARKER_PREFIX}{safe_sha} -->"
-    return any(marker in (review.get("body") or "") for review in reviews)
+    return any(
+        marker in (review.get("body") or "")
+        for review in filter_bot_reviews(reviews)
+    )
+
+
+def has_review_for_head(reviews: list[dict], head_sha: str, kind: str) -> bool:
+    safe_sha = "".join(character for character in head_sha if character.isalnum())
+    safe_kind = "".join(character for character in kind if character.isalnum() or character == "-")
+    marker = f"{REVIEW_MARKER_PREFIX}{safe_kind} head_sha={safe_sha} -->"
+    return any(
+        marker in (review.get("body") or "")
+        for review in filter_bot_reviews(reviews)
+    )
+
+
+def _review_marker(head_sha: str, kind: str) -> str:
+    safe_sha = "".join(character for character in head_sha if character.isalnum())
+    safe_kind = "".join(character for character in kind if character.isalnum() or character == "-")
+    return f"{REVIEW_MARKER_PREFIX}{safe_kind} head_sha={safe_sha} -->"
 
 
 def _escape_table_cell(text: str | None) -> str:
@@ -256,14 +302,15 @@ async def submit_review(
     repo: str,
     pr_number: int,
     result: ReviewResult,
+    head_sha: str,
 ) -> None:
     # 기본 GITHUB_TOKEN은 GitHub 정책상 APPROVE 이벤트를 거부한다(422).
     # 봇의 결정은 본문 라벨로 노출하고, API 이벤트는 항상 COMMENT로 통일.
-    body = format_review_body(result)
+    body = f"{format_review_body(result)}\n\n{_review_marker(head_sha, 'normal')}"
     _validate_github_body(body)
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
-        json_data={"body": body, "event": "COMMENT"},
+        json_data={"body": body, "event": "COMMENT", "commit_id": head_sha},
     )
 
 
@@ -296,7 +343,7 @@ async def submit_split_request(
     _validate_github_body(body)
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
-        json_data={"body": body, "event": "COMMENT"},
+        json_data={"body": body, "event": "COMMENT", "commit_id": head_sha},
     )
 
 
@@ -305,17 +352,21 @@ async def submit_spec_gate_review(
     repo: str,
     pr_number: int,
     reason: str,
+    head_sha: str,
 ) -> None:
     body = "\n".join([
         BOT_REVIEW_MARKER,
         "",
         "### 판정: 🚫 조건 불충분 — 리뷰 차단",
         "",
-        f"> {reason}",
+        f"> {_escape_table_cell(reason)}",
         "",
         "**spec 문서를 추가한 뒤 다시 push 해주세요.** 리뷰는 조건 충족 후 자동 실행됩니다.",
+        "",
+        _review_marker(head_sha, "spec-gate"),
     ])
+    _validate_github_body(body)
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
-        json_data={"body": body, "event": "COMMENT"},
+        json_data={"body": body, "event": "COMMENT", "commit_id": head_sha},
     )

@@ -3,11 +3,12 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from src.review.engine import HeadSnapshotChanged, review_pr, ReviewContext
+from src.review.engine import HeadSnapshotChanged, load_repo_config, review_pr, ReviewContext
 from src.models.review import ArchitectureFinding, Decision, Mismatch, ReviewResult, SpecStatus
 from src.models.config import ReviewConfig
 from src.models.review_pipeline import ReviewPartial, ReviewRoute
 from src.review.cost import CostPolicy
+from src.review.errors import ReviewInfraCategory, ReviewInfraError
 
 
 @pytest.fixture
@@ -38,7 +39,8 @@ def make_get_json_dispatch(
 ):
     pr_info = pr_info or {
         "title": "T", "body": "B",
-        "head": {"ref": "feat", "sha": "deadbeef"}, "base": {"ref": "main"},
+        "head": {"ref": "feat", "sha": "deadbeef"},
+        "base": {"ref": "main", "sha": "basebeef"},
     }
     reviews = reviews or []
     issue_comments = issue_comments or []
@@ -62,7 +64,7 @@ def _mock_github(diff="diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x", **dispatch_kw
     m.get_json.side_effect = make_get_json_dispatch(**dispatch_kwargs)
     from src.review.diff_parser import parse_diff
     parsed = parse_diff(diff)
-    m.get_json_list = AsyncMock(return_value=[
+    raw_files = [
         {
             "filename": item.path,
             "previous_filename": item.previous_path,
@@ -72,7 +74,13 @@ def _mock_github(diff="diff --git a/a.py b/a.py\n@@ -1 +1 @@\n+x", **dispatch_kw
             "status": item.status,
         }
         for item in parsed
-    ])
+    ]
+    m.get_json_list = AsyncMock(return_value=raw_files)
+    reviews = dispatch_kwargs.get("reviews") or []
+    if reviews:
+        async def list_dispatch(path):
+            return reviews if path.endswith("/reviews") else raw_files
+        m.get_json_list.side_effect = list_dispatch
     m.post = AsyncMock(return_value={"id": 1})
     return m
 
@@ -112,7 +120,7 @@ async def test_review_pr_submits_when_present(context, aligned_result):
 
 
 @pytest.mark.asyncio
-async def test_config_is_loaded_from_snapshot_sha(context, aligned_result):
+async def test_config_is_loaded_from_trusted_base_sha(context, aligned_result):
     mock_github = _mock_github()
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = aligned_result
@@ -124,14 +132,32 @@ async def test_config_is_loaded_from_snapshot_sha(context, aligned_result):
     ) as load_config, _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
-    assert load_config.await_args.args[2] == "deadbeef"
+    assert load_config.await_args.args[2] == "basebeef"
+
+
+@pytest.mark.asyncio
+async def test_missing_base_sha_is_explicit_infrastructure_error(context):
+    pr_info = {
+        "title": "T",
+        "body": "B",
+        "head": {"ref": "feat", "sha": "deadbeef"},
+        "base": {"ref": "main"},
+    }
+    mock_github = _mock_github(pr_info=pr_info)
+
+    with pytest.raises(ReviewInfraError) as exc_info:
+        await review_pr(context, mock_github, AsyncMock())
+
+    assert exc_info.value.category is ReviewInfraCategory.GITHUB_RESPONSE_ERROR
+    assert "base.sha" in exc_info.value.safe_message
 
 
 @pytest.mark.asyncio
 async def test_head_change_after_diff_aborts_without_review_or_publish(context):
     initial = {
         "title": "T", "body": "B",
-        "head": {"ref": "feat", "sha": "oldsha"}, "base": {"ref": "main"},
+        "head": {"ref": "feat", "sha": "oldsha"},
+        "base": {"ref": "main", "sha": "basesha"},
     }
     changed = {
         **initial,
@@ -168,7 +194,8 @@ async def test_head_change_after_diff_aborts_without_review_or_publish(context):
 async def test_head_change_during_review_blocks_normal_publish(context, aligned_result):
     initial = {
         "title": "T", "body": "B",
-        "head": {"ref": "feat", "sha": "oldsha"}, "base": {"ref": "main"},
+        "head": {"ref": "feat", "sha": "oldsha"},
+        "base": {"ref": "main", "sha": "basesha"},
     }
     changed = {**initial, "head": {"ref": "feat", "sha": "newsha"}}
     mock_github = _mock_github()
@@ -227,7 +254,8 @@ async def test_normal_diff_inventory_mismatch_requests_split(context):
 async def test_changed_files_count_mismatch_requests_split(context):
     pr_info = {
         "title": "T", "body": "B", "changed_files": 2,
-        "head": {"ref": "feat", "sha": "deadbeef"}, "base": {"ref": "main"},
+        "head": {"ref": "feat", "sha": "deadbeef"},
+        "base": {"ref": "main", "sha": "basebeef"},
     }
     mock_github = _mock_github(pr_info=pr_info)
     mock_gpt = AsyncMock()
@@ -271,7 +299,8 @@ async def test_normal_diff_missing_required_text_patch_requests_split(context):
 @pytest.mark.asyncio
 async def test_existing_split_request_for_same_head_is_not_posted_again(context):
     reviews = [{
-        "body": "## 🤖 AI 리뷰\n<!-- syscon-review-bot:split-request head_sha=deadbeef -->"
+        "body": "## 🤖 AI 리뷰\n<!-- syscon-review-bot:split-request head_sha=deadbeef -->",
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
     }]
     mock_github = _mock_github(
         diff=_large_diff(("src/huge.py", 2501)),
@@ -292,7 +321,29 @@ async def test_existing_split_request_for_same_head_is_not_posted_again(context)
 
 
 @pytest.mark.asyncio
-async def test_binary_and_rename_only_do_not_trigger_incomplete_diff(context, aligned_result):
+async def test_human_copied_split_marker_does_not_skip_post(context):
+    reviews = [{
+        "body": "## 🤖 AI 리뷰\n<!-- syscon-review-bot:split-request head_sha=deadbeef -->",
+        "user": {"login": "alice", "type": "User"},
+    }]
+    mock_github = _mock_github(
+        diff=_large_diff(("src/huge.py", 2501)),
+        reviews=reviews,
+    )
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, AsyncMock())
+
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_github.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_binary_in_mixed_diff_requests_split(context, aligned_result):
     diff = (
         "diff --git a/assets/logo.png b/assets/logo.png\n"
         "Binary files a/assets/logo.png and b/assets/logo.png differ\n"
@@ -316,9 +367,9 @@ async def test_binary_and_rename_only_do_not_trigger_incomplete_diff(context, al
     ), _NO_EXPAND:
         result = await review_pr(context, mock_github, mock_gpt)
 
-    assert result.route is ReviewRoute.SINGLE
-    mock_gpt.review.assert_called_once()
-    assert "PR 분할 필요" not in mock_github.post.call_args.kwargs["json_data"]["body"]
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_gpt.review.assert_not_called()
+    assert "INCOMPLETE_DIFF" in mock_github.post.call_args.kwargs["json_data"]["body"]
 
 
 @pytest.mark.asyncio
@@ -347,6 +398,108 @@ async def test_only_binary_and_rename_changes_do_not_auto_approve(context):
     assert result.route is ReviewRoute.SPLIT_REQUEST
     mock_gpt.review.assert_not_called()
     assert "INCOMPLETE_DIFF" in mock_github.post.call_args.kwargs["json_data"]["body"]
+
+
+@pytest.mark.asyncio
+async def test_pure_rename_is_included_in_prompt_and_coverage(context, aligned_result):
+    diff = (
+        "diff --git a/old.py b/new.py\n"
+        "similarity index 100%\nrename from old.py\nrename to new.py\n"
+        "diff --git a/src/code.py b/src/code.py\n@@ -1 +1 @@\n-old\n+new\n"
+    )
+    mock_github = _mock_github(diff=diff)
+    mock_gpt = AsyncMock()
+    captured = {}
+
+    async def fake_review(system, user, **kwargs):
+        captured["user"] = user
+        return aligned_result
+
+    mock_gpt.review.side_effect = fake_review
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_judge=False, enable_tool_use=False),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.route is ReviewRoute.SINGLE
+    assert "### new.py (+0, -0)" in captured["user"]
+    assert "rename from old.py" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_patch_line_count_mismatch_requests_split(context):
+    mock_github = _mock_github()
+    mock_github.get_json_list.return_value = [{
+        "filename": "a.py",
+        "patch": "@@ -1 +1 @@\n+x",
+        "additions": 10,
+        "deletions": 0,
+        "status": "modified",
+    }]
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_gpt.review.assert_not_called()
+    assert "INCOMPLETE_DIFF" in mock_github.post.call_args.kwargs["json_data"]["body"]
+
+
+@pytest.mark.asyncio
+async def test_existing_normal_review_for_same_head_is_idempotent(context):
+    reviews = [{
+        "body": (
+            "## 🤖 AI 리뷰\n### 판정: ❌ (수정 필요)\n"
+            "<!-- syscon-review-bot:review kind=normal head_sha=deadbeef -->"
+        ),
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
+    }]
+    mock_github = _mock_github(reviews=reviews)
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_judge=False),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.decision is Decision.REQUEST_CHANGES
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_human_copied_normal_marker_does_not_skip_review(
+    context, aligned_result
+):
+    reviews = [{
+        "body": (
+            "## 🤖 AI 리뷰\n"
+            "<!-- syscon-review-bot:review kind=normal head_sha=deadbeef -->"
+        ),
+        "user": {"login": "alice", "type": "User"},
+    }]
+    mock_github = _mock_github(reviews=reviews)
+    mock_gpt = AsyncMock()
+    mock_gpt.review.return_value = aligned_result
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_judge=False),
+    ), _NO_EXPAND:
+        await review_pr(context, mock_github, mock_gpt)
+
+    mock_gpt.review.assert_awaited_once()
+    mock_github.post.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -850,14 +1003,13 @@ async def test_review_pr_omits_tool_executor_when_disabled(context, aligned_resu
 
 
 @pytest.mark.asyncio
-async def test_load_repo_config_falls_back_to_default_on_non_404_error():
-    from src.review.engine import load_repo_config
-    from src.review.config_loader import DEFAULT_CONFIG
+async def test_load_repo_config_raises_typed_failure_on_non_404_error():
     mock_gh = AsyncMock()
     # 5xx 시뮬레이션
     mock_gh.get_json = AsyncMock(side_effect=RuntimeError("simulated 500"))
-    cfg = await load_repo_config(mock_gh, "owner/repo", "deadbeef")
-    assert cfg is DEFAULT_CONFIG
+    with pytest.raises(ReviewInfraError) as exc_info:
+        await load_repo_config(mock_gh, "owner/repo", "deadbeef")
+    assert exc_info.value.category is ReviewInfraCategory.GITHUB_TRANSPORT_ERROR
 
 
 @pytest.mark.asyncio
@@ -932,7 +1084,7 @@ async def test_review_pr_falls_back_to_files_api_on_406(context, aligned_result)
     with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_judge=False, require_spec_files=False)), _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
-    mock_github.get_json_list.assert_called_once()
+    assert mock_github.get_json_list.await_args_list[0].args[0].endswith("/files")
     mock_gpt.review.assert_called_once()
 
 
@@ -1014,6 +1166,55 @@ async def test_spec_gate_blocks_when_no_spec_files(context):
     mock_github.post.assert_called_once()
     payload = mock_github.post.call_args.kwargs["json_data"]
     assert "조건 불충분" in payload["body"]
+    assert payload["commit_id"] == "deadbeef"
+    assert "kind=spec-gate head_sha=deadbeef" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_existing_spec_gate_for_same_head_is_not_posted_again(context):
+    reviews = [{
+        "body": (
+            "## 🤖 AI 리뷰\n"
+            "<!-- syscon-review-bot:review kind=spec-gate head_sha=deadbeef -->"
+        ),
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
+    }]
+    mock_github = _mock_github(reviews=reviews)
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(require_spec_files=True),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.decision is Decision.REQUEST_CHANGES
+    assert result.spec_gate_passed is False
+    mock_gpt.review.assert_not_called()
+    mock_github.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_human_copied_spec_gate_marker_does_not_skip_post(context):
+    reviews = [{
+        "body": (
+            "## 🤖 AI 리뷰\n"
+            "<!-- syscon-review-bot:review kind=spec-gate head_sha=deadbeef -->"
+        ),
+        "user": {"login": "alice", "type": "User"},
+    }]
+    mock_github = _mock_github(reviews=reviews)
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(require_spec_files=True),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, AsyncMock())
+
+    assert result.spec_gate_passed is False
+    mock_github.post.assert_awaited_once()
 
 
 @pytest.mark.asyncio
