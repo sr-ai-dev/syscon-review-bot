@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from src.models.config import RepositoryCostConfig
 from src.review.cost import (
     GPT_5_6_TERRA_PRICING,
     CostLedger,
@@ -124,6 +125,56 @@ async def test_ledger_reserves_and_reconciles_actual_usage():
     assert ledger.remaining_nusd == 9_725_000
 
 
+def test_repository_cost_config_can_only_narrow_trusted_policy():
+    trusted = CostPolicy(
+        enabled=True,
+        hard_limit_usd="1.00",
+        allowed_models=("gpt-5.6-terra",),
+        max_requests_per_pr=12,
+        max_completion_tokens_per_call=4096,
+        max_tool_result_tokens_per_call=4096,
+        max_history_tokens=12000,
+    )
+    repository = RepositoryCostConfig(
+        hard_limit_usd="0.50",
+        max_requests_per_pr=6,
+        max_completion_tokens_per_call=2048,
+        max_tool_result_tokens_per_call=1024,
+        max_history_tokens=6000,
+    )
+
+    effective = trusted.restricted_by(repository)
+
+    assert effective.enabled is True
+    assert effective.hard_limit_usd == Decimal("0.50")
+    assert effective.allowed_models == trusted.allowed_models
+    assert effective.preflight_margin_bps == trusted.preflight_margin_bps
+    assert effective.warning_ratio == trusted.warning_ratio
+    assert effective.max_requests_per_pr == 6
+    assert effective.max_completion_tokens_per_call == 2048
+    assert effective.max_tool_result_tokens_per_call == 1024
+    assert effective.max_history_tokens == 6000
+
+
+def test_repository_cost_config_cannot_raise_trusted_limits():
+    trusted = CostPolicy(
+        hard_limit_usd="0.25",
+        max_requests_per_pr=3,
+        max_completion_tokens_per_call=512,
+        max_tool_result_tokens_per_call=256,
+        max_history_tokens=1000,
+    )
+    repository = RepositoryCostConfig(
+        hard_limit_usd="9.00",
+        max_requests_per_pr=99,
+        max_completion_tokens_per_call=9999,
+        max_tool_result_tokens_per_call=9999,
+        max_history_tokens=9999,
+    )
+
+    assert trusted.restricted_by(repository) == trusted
+
+
 async def test_ledger_keeps_full_reservation_when_usage_is_unknown():
     ledger = CostLedger(CostPolicy(hard_limit_usd="0.01"), GPT_5_6_TERRA_PRICING)
     await ledger.reserve("failed-call", 4_000_000)
@@ -193,6 +244,21 @@ async def test_partial_usage_is_invalid_and_keeps_reservation_active():
         await ledger.reconcile("call", 1, None, 1)
 
     assert ledger.reserved_nusd == 10_000
+    assert ledger.usage_unknown_nusd == 0
+
+
+async def test_ledger_can_validate_and_cancel_an_unspent_reservation():
+    ledger = CostLedger(CostPolicy(), GPT_5_6_TERRA_PRICING)
+    await ledger.reserve("future-synthesis", 50_000)
+
+    await ledger.require_reservation("future-synthesis", 40_000)
+    with pytest.raises(CostLimitExceeded):
+        await ledger.require_reservation("future-synthesis", 60_000)
+
+    released = await ledger.cancel_reservation("future-synthesis")
+    assert released == 50_000
+    assert ledger.reserved_nusd == 0
+    assert ledger.actual_nusd == 0
     assert ledger.usage_unknown_nusd == 0
 
 

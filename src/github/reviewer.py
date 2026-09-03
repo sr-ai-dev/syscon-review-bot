@@ -26,6 +26,12 @@ def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
     return [r for r in reviews if BOT_REVIEW_MARKER in (r.get("body") or "")]
 
 
+def has_split_request_for_head(reviews: list[dict], head_sha: str) -> bool:
+    safe_sha = "".join(character for character in head_sha if character.isalnum())
+    marker = f"{SPLIT_REQUEST_MARKER_PREFIX}{safe_sha} -->"
+    return any(marker in (review.get("body") or "") for review in reviews)
+
+
 def _escape_table_cell(text: str | None) -> str:
     if not text:
         return ""

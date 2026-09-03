@@ -42,6 +42,32 @@ class TestParseDiff:
     def test_empty_diff_returns_empty_list(self):
         assert parse_diff("") == []
 
+    def test_parses_quoted_utf8_rename_destination_path(self):
+        diff = (
+            'diff --git "a/spec/old-\\352\\270\\260.md" '
+            '"b/spec/new-\\352\\270\\260.md"\n'
+            "similarity index 100%\n"
+            'rename from "spec/old-\\352\\270\\260.md"\n'
+            'rename to "spec/new-\\352\\270\\260.md"\n'
+        )
+
+        files = parse_diff(diff)
+
+        assert len(files) == 1
+        assert files[0].path == "spec/new-기.md"
+        assert files[0].previous_path == "spec/old-기.md"
+        assert files[0].status == "renamed"
+        assert files[0].patch == ""
+
+    def test_marks_binary_diff_without_treating_it_as_text_patch(self):
+        files = parse_diff(
+            "diff --git a/assets/logo.png b/assets/logo.png\n"
+            "Binary files a/assets/logo.png and b/assets/logo.png differ\n"
+        )
+
+        assert files[0].is_binary is True
+        assert files[0].patch == ""
+
 
 class TestFilterFiles:
     def test_filter_by_extension(self):

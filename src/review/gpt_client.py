@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import openai
 from openai import AsyncOpenAI
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -13,9 +13,10 @@ from tenacity import (
 )
 
 from src.models.review import ReviewResult
+from src.models.review_pipeline import ReviewPartial
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
 from src.review.llm_tools import TOOL_SCHEMAS, dispatch_tool_call
-from src.review.structured_output import REVIEW_RESPONSE_FORMAT
+from src.review.structured_output import REVIEW_PARTIAL_RESPONSE_FORMAT, REVIEW_RESPONSE_FORMAT
 from src.review.tool_executor import ToolExecutor
 from src.review.cost import CostLedger, estimate_request_ceiling_nusd
 from src.review.token_counter import count_tokens
@@ -62,6 +63,7 @@ class GPTClient:
         cost_ledger: CostLedger | None,
         cost_stage: str,
         max_completion_tokens: int | None,
+        pre_reserved_call_id: str | None = None,
         **kwargs,
     ):
         if max_completion_tokens is not None:
@@ -81,11 +83,18 @@ class GPTClient:
         )
         response = None
         for attempt in range(3):
-            call_id = f"{cost_stage}:attempt-{attempt + 1}:{uuid4().hex}"
-            await cost_ledger.reserve(call_id, ceiling)
+            if attempt == 0 and pre_reserved_call_id is not None:
+                call_id = pre_reserved_call_id
+                await cost_ledger.require_reservation(call_id, ceiling)
+            else:
+                call_id = f"{cost_stage}:attempt-{attempt + 1}:{uuid4().hex}"
+                await cost_ledger.reserve(call_id, ceiling)
             try:
                 response = await self._client.chat.completions.create(**kwargs)
                 break
+            except asyncio.CancelledError:
+                await cost_ledger.reconcile(call_id, None, None, None)
+                raise
             except RETRYABLE_OPENAI_ERRORS as exc:
                 await cost_ledger.reconcile(call_id, None, None, None)
                 if attempt == 2:
@@ -100,6 +109,9 @@ class GPTClient:
                     ReviewInfraCategory.OPENAI_TRANSPORT_ERROR,
                     "OpenAI request failed after the configured retry policy",
                 ) from exc
+            except BaseException:
+                await cost_ledger.reconcile(call_id, None, None, None)
+                raise
 
         if response is None:  # defensive; every branch above returns or raises
             raise RuntimeError("metered request ended without a response")
@@ -127,7 +139,9 @@ class GPTClient:
         max_completion_tokens: int | None = None,
         cost_ledger: CostLedger | None = None,
         cost_stage: str = "review",
-    ) -> ReviewResult:
+        pre_reserved_call_id: str | None = None,
+        response_model: type[BaseModel] = ReviewResult,
+    ) -> BaseModel:
         chosen_model = model or self._default_model
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
@@ -136,12 +150,17 @@ class GPTClient:
 
         # reasoning_effort 사용 시 tool_executor 무시 (chat.completions API 제약)
         use_tools = tool_executor is not None and reasoning_effort is None
+        response_format = (
+            REVIEW_PARTIAL_RESPONSE_FORMAT
+            if response_model is ReviewPartial
+            else REVIEW_RESPONSE_FORMAT
+        )
 
         if not use_tools:
             kwargs = {
                 "model": chosen_model,
                 "messages": messages,
-                "response_format": REVIEW_RESPONSE_FORMAT,
+                "response_format": response_format,
             }
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
@@ -151,9 +170,10 @@ class GPTClient:
                 cost_ledger=cost_ledger,
                 cost_stage=cost_stage,
                 max_completion_tokens=max_completion_tokens,
+                pre_reserved_call_id=pre_reserved_call_id,
                 **kwargs,
             )
-            return self._parse_final_response(response)
+            return self._parse_final_response(response, response_model)
 
         for _ in range(max_tool_iterations):
             response = await self._metered_request(
@@ -162,14 +182,21 @@ class GPTClient:
                 max_completion_tokens=max_completion_tokens,
                 model=chosen_model,
                 messages=messages,
-                response_format=REVIEW_RESPONSE_FORMAT,
+                response_format=response_format,
                 temperature=0.1,
                 tools=TOOL_SCHEMAS,
                 tool_choice="auto",
+                parallel_tool_calls=False,
+                pre_reserved_call_id=(pre_reserved_call_id if _ == 0 else None),
             )
             choice, msg = self._choice_and_message(response)
             if not getattr(msg, "tool_calls", None):
-                return self._parse_final_message(choice, msg)
+                return self._parse_final_message(choice, msg, response_model)
+            if len(msg.tool_calls) > 1:
+                raise ReviewInfraError(
+                    ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE,
+                    "OpenAI returned multiple tool calls when parallel tools were disabled",
+                )
 
             messages.append({
                 "role": "assistant",
@@ -224,11 +251,15 @@ class GPTClient:
             )
         return choice, message
 
-    def _parse_final_response(self, response) -> ReviewResult:
+    def _parse_final_response(
+        self, response, response_model: type[BaseModel] = ReviewResult
+    ) -> BaseModel:
         choice, message = self._choice_and_message(response)
-        return self._parse_final_message(choice, message)
+        return self._parse_final_message(choice, message, response_model)
 
-    def _parse_final_message(self, choice, message) -> ReviewResult:
+    def _parse_final_message(
+        self, choice, message, response_model: type[BaseModel] = ReviewResult
+    ) -> BaseModel:
         refusal = getattr(message, "refusal", None)
         if isinstance(refusal, str) and refusal:
             raise ReviewInfraError(
@@ -249,9 +280,11 @@ class GPTClient:
                 ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE,
                 "OpenAI returned no review content",
             )
-        return self._parse(content)
+        return self._parse(content, response_model)
 
-    def _parse(self, content: str) -> ReviewResult:
+    def _parse(
+        self, content: str, response_model: type[BaseModel] = ReviewResult
+    ) -> BaseModel:
         try:
             data = json.loads(content)
         except (json.JSONDecodeError, TypeError) as exc:
@@ -264,9 +297,10 @@ class GPTClient:
                 ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
                 "Review response did not contain a JSON object",
             )
-        self._normalize_prior_resolved(data)
+        if response_model is ReviewResult:
+            self._normalize_prior_resolved(data)
         try:
-            return ReviewResult(**data)
+            return response_model(**data)
         except ValidationError as exc:
             raise ReviewInfraError(
                 ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,

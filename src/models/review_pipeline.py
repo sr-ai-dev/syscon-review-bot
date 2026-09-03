@@ -2,6 +2,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.models.review import SpecStatus
+
 
 class ReviewRoute(str, Enum):
     SINGLE = "single"
@@ -99,6 +101,9 @@ class ReviewPartial(BaseModel):
 
     unit_id: str
     covered_paths: list[str]
+    spec_status: SpecStatus
+    aligned: bool
+    summary: str
     findings: list[ScopedFinding] = Field(default_factory=list)
     prior_resolved: list[str] = Field(default_factory=list)
 

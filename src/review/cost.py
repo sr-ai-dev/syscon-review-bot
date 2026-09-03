@@ -244,6 +244,38 @@ class CostPolicy:
             raise UnknownModelPricing(f"model is not allowed by cost policy: {model}")
         return get_model_pricing(model)
 
+    def restricted_by(self, repository_policy: object | None) -> CostPolicy:
+        """Apply only repository-owned limits that are stricter than this policy."""
+
+        if repository_policy is None:
+            return self
+
+        def narrower(field_name: str, trusted_value):
+            candidate = getattr(repository_policy, field_name, None)
+            return trusted_value if candidate is None else min(trusted_value, candidate)
+
+        return CostPolicy(
+            enabled=self.enabled,
+            hard_limit_usd=narrower("hard_limit_usd", self.hard_limit_usd),
+            warning_ratio=self.warning_ratio,
+            preflight_margin_bps=self.preflight_margin_bps,
+            allowed_models=self.allowed_models,
+            max_requests_per_pr=narrower(
+                "max_requests_per_pr", self.max_requests_per_pr
+            ),
+            max_completion_tokens_per_call=narrower(
+                "max_completion_tokens_per_call",
+                self.max_completion_tokens_per_call,
+            ),
+            max_tool_result_tokens_per_call=narrower(
+                "max_tool_result_tokens_per_call",
+                self.max_tool_result_tokens_per_call,
+            ),
+            max_history_tokens=narrower(
+                "max_history_tokens", self.max_history_tokens
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CostReservation:
@@ -314,6 +346,30 @@ class CostLedger:
                 raise error
             self._reservations[call_id] = requested
             return CostReservation(call_id, requested)
+
+    async def require_reservation(
+        self, call_id: str, minimum_nusd: int
+    ) -> CostReservation:
+        """Validate that a planned reservation covers a request before sending it."""
+
+        required = _nonnegative_int(minimum_nusd, "minimum_nusd")
+        async with self._lock:
+            if call_id not in self._reservations:
+                raise KeyError(f"no active reservation for call_id: {call_id}")
+            reserved = self._reservations[call_id]
+            if required > reserved:
+                raise CostLimitExceeded(required, reserved)
+            return CostReservation(call_id, reserved)
+
+    async def cancel_reservation(self, call_id: str, *, missing_ok: bool = False) -> int:
+        """Release a planned reservation when its request was never sent."""
+
+        async with self._lock:
+            if call_id not in self._reservations:
+                if missing_ok:
+                    return 0
+                raise KeyError(f"no active reservation for call_id: {call_id}")
+            return self._reservations.pop(call_id)
 
     async def reconcile(
         self,

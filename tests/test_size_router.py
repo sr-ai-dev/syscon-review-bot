@@ -62,6 +62,17 @@ def test_one_over_single_boundary_routes_multi():
     assert len(plan.units) == 2
 
 
+def test_raw_tokens_route_docs_even_when_weighted_tokens_fit_single():
+    plan = build_review_plan(
+        [fd("docs/large.md", additions=1, patch="x")],
+        token_counter=lambda _: 40_001,
+    )
+
+    assert plan.metrics.effective_tokens == math.ceil(40_001 * 0.35)
+    assert plan.metrics.raw_tokens == 40_001
+    assert plan.route is ReviewRoute.MULTI
+
+
 def test_multi_exact_boundaries_are_allowed():
     policy = SizeRoutingPolicy(single_max_effective_files=1, multi_max_effective_files=4)
     plan = build_review_plan(
@@ -85,6 +96,7 @@ def test_one_over_each_multi_boundary_requests_split():
         ([fd("a.py", additions=2501, patch="x")], lambda _: 1),
         ([fd(f"f{i}.py", patch="x") for i in range(81)], lambda _: 1),
         ([fd("a.py", patch="x")], lambda _: 100_001),
+        ([fd("docs/a.md", patch="x"), fd("docs/b.md", patch="y")], lambda _: 50_001),
     ]
 
     for files, counter in cases:

@@ -77,17 +77,18 @@ def classify_route(
     metrics: ReviewSizeMetrics,
     policy: SizeRoutingPolicy | None = None,
 ) -> tuple[ReviewRoute, RoutingReasonCode]:
+    """Route on raw patch tokens; weighted tokens size reviewer shard inputs."""
     policy = policy or SizeRoutingPolicy()
     if (
         metrics.effective_lines <= policy.single_max_effective_lines
         and metrics.effective_files <= policy.single_max_effective_files
-        and metrics.effective_tokens <= policy.single_max_tokens
+        and metrics.raw_tokens <= policy.single_max_tokens
     ):
         return ReviewRoute.SINGLE, RoutingReasonCode.WITHIN_SINGLE_LIMIT
     if (
         metrics.effective_lines <= policy.multi_max_effective_lines
         and metrics.effective_files <= policy.multi_max_effective_files
-        and metrics.effective_tokens <= policy.multi_max_tokens
+        and metrics.raw_tokens <= policy.multi_max_tokens
     ):
         return ReviewRoute.MULTI, RoutingReasonCode.REQUIRES_MULTI_REVIEW
     return ReviewRoute.SPLIT_REQUEST, RoutingReasonCode.SIZE_LIMIT
@@ -113,6 +114,8 @@ def _component_key(path: str) -> str:
 
 
 def _weighted_file_tokens(changed_file: FileDiff, token_counter: TokenCounter) -> float:
+    # Shard capacity is a scoped effective-token budget. The PR-wide 40k/100k
+    # routing thresholds intentionally use raw_tokens in classify_route().
     return file_weight(changed_file.path) * token_counter(changed_file.patch)
 
 

@@ -16,6 +16,7 @@ from src.github.pr import (
 )
 from src.github.reviewer import (
     filter_bot_reviews,
+    has_split_request_for_head,
     submit_review,
     submit_spec_gate_review,
     submit_split_request,
@@ -67,6 +68,17 @@ class ReviewRunResult:
     cost_nusd: int = 0
 
 
+class HeadSnapshotChanged(RuntimeError):
+    """The PR head moved while a review snapshot was being collected."""
+
+    def __init__(self, expected_sha: str, actual_sha: str):
+        self.expected_sha = expected_sha
+        self.actual_sha = actual_sha
+        super().__init__(
+            f"PR head changed during snapshot collection: {expected_sha} -> {actual_sha}; rerun review"
+        )
+
+
 async def load_repo_config(
     github_client: GitHubClient,
     repo: str,
@@ -97,55 +109,68 @@ async def review_pr(
     logger.info(f"Reviewing {context.repo}#{context.pr_number}")
 
     pr_info = await get_pr_info(github_client, context.repo, context.pr_number)
-    config = await load_repo_config(
-        github_client, context.repo, pr_info["head"]["ref"], config_path
-    )
     head_sha = pr_info["head"]["sha"]
+    config = await load_repo_config(
+        github_client, context.repo, head_sha, config_path
+    )
     cost_policy = cost_policy or CostPolicy()
+    cost_policy = cost_policy.restricted_by(config.cost_control)
     size_policy = size_policy or SizeRoutingPolicy()
     chosen_model = model_override or config.model
     if not chosen_model:
         default_model = getattr(gpt_client, "default_model", None)
         chosen_model = default_model if isinstance(default_model, str) else "gpt-5.6-terra"
 
-    missing_patch_items: list[dict] = []
     try:
         diff_text = await get_pr_diff(github_client, context.repo, context.pr_number)
         files = parse_diff(diff_text)
-        raw_files = None
     except httpx.HTTPStatusError as e:
         if e.response.status_code != 406:
             raise
         logger.warning(f"Diff too large (406), falling back to files API for {context.repo}#{context.pr_number}")
-        raw_files = await get_pr_files(github_client, context.repo, context.pr_number)
+        diff_text = None
+        files = []
+
+    # The files inventory is authoritative for coverage. GitHub can truncate a
+    # successful diff response, so a 200 response alone is insufficient.
+    raw_files = await get_pr_files(github_client, context.repo, context.pr_number)
+    if diff_text is None:
         files = parse_pr_files(raw_files)
-        missing_patch_items = [item for item in raw_files if not item.get("patch")]
+
+    await _assert_head_unchanged(github_client, context, head_sha)
 
     if config.require_spec_files:
-        if raw_files is None:
-            raw_files = await get_pr_files(github_client, context.repo, context.pr_number)
         spec_result = check_spec_files([item["filename"] for item in raw_files])
         if not spec_result.ok:
             logger.info(f"Spec gate failed: {spec_result.message}")
+            await _assert_head_unchanged(github_client, context, head_sha)
             await submit_spec_gate_review(
                 github_client, context.repo, context.pr_number, spec_result.message
             )
             return ReviewRunResult(Decision.REQUEST_CHANGES, spec_gate_passed=False)
 
-    missing_patch_files = filter_files(
-        [
-            FileDiff(
-                path=item["filename"],
-                patch="",
-                additions=item.get("additions", 0),
-                deletions=item.get("deletions", 0),
-            )
-            for item in missing_patch_items
-        ],
-        config.ignore,
+    inventory = filter_files([_inventory_file(item) for item in raw_files], config.ignore)
+    parsed = filter_files(files, config.ignore)
+    inventory_by_path = {item.path: item for item in inventory}
+    parsed_by_path = {item.path: item for item in parsed}
+    optional_patch_paths = {
+        item["filename"]
+        for item in raw_files
+        if _patch_is_optional(item)
+    }
+    inventory_paths = set(inventory_by_path)
+    parsed_paths = set(parsed_by_path)
+    inventory_count_mismatch = (
+        isinstance(pr_info.get("changed_files"), int)
+        and pr_info["changed_files"] != len(raw_files)
     )
-    if missing_patch_files:
-        inventory = filter_files([*files, *missing_patch_files], config.ignore)
+    path_mismatch = inventory_paths != parsed_paths | (inventory_paths & optional_patch_paths)
+    missing_required_patch = any(
+        path not in optional_patch_paths
+        and (path not in parsed_by_path or not parsed_by_path[path].patch)
+        for path in inventory_paths
+    )
+    if inventory_count_mismatch or path_mismatch or missing_required_patch:
         measured_plan = build_review_plan(
             inventory,
             policy=size_policy,
@@ -175,6 +200,21 @@ async def review_pr(
             Decision.REQUEST_CHANGES,
             route=ReviewRoute.SPLIT_REQUEST,
         )
+
+    # Binary and pure rename entries remain in the inventory check, but have no
+    # textual patch to send to the model. API line counts remain authoritative.
+    files = [
+        FileDiff(
+            path=path,
+            patch=parsed_by_path[path].patch,
+            additions=inventory_by_path[path].additions,
+            deletions=inventory_by_path[path].deletions,
+            status=inventory_by_path[path].status,
+            previous_path=inventory_by_path[path].previous_path,
+            is_binary=parsed_by_path[path].is_binary,
+        )
+        for path in sorted(inventory_paths - optional_patch_paths)
+    ]
 
     if not files:
         logger.info("Empty diff, skipping")
@@ -309,6 +349,7 @@ async def review_pr(
         )
 
     decision = compute_decision(result)
+    await _assert_head_unchanged(github_client, context, head_sha)
     await submit_review(github_client, context.repo, context.pr_number, result)
     logger.info(
         f"Submitted review for {context.repo}#{context.pr_number}: "
@@ -329,6 +370,18 @@ async def _submit_split_plan(
     policy: SizeRoutingPolicy,
     reason_codes: list[str],
 ) -> None:
+    await _assert_head_unchanged(github_client, context, plan.head_sha)
+    reviews = await get_pr_reviews(
+        github_client, context.repo, context.pr_number
+    )
+    if has_split_request_for_head(reviews, plan.head_sha):
+        logger.info(
+            "Split request already exists for %s#%s at %s",
+            context.repo,
+            context.pr_number,
+            plan.head_sha,
+        )
+        return
     await submit_split_request(
         github_client,
         context.repo,
@@ -343,6 +396,42 @@ async def _submit_split_plan(
         suggested_groups=[unit.paths for unit in plan.units],
         head_sha=plan.head_sha,
     )
+
+
+async def _assert_head_unchanged(
+    github_client: GitHubClient,
+    context: ReviewContext,
+    expected_sha: str,
+) -> None:
+    current_pr_info = await get_pr_info(
+        github_client, context.repo, context.pr_number
+    )
+    actual_sha = current_pr_info["head"]["sha"]
+    if actual_sha != expected_sha:
+        raise HeadSnapshotChanged(expected_sha, actual_sha)
+
+
+def _inventory_file(item: dict) -> FileDiff:
+    return FileDiff(
+        path=item["filename"],
+        patch=item.get("patch") or "",
+        additions=item.get("additions", 0),
+        deletions=item.get("deletions", 0),
+        status=item.get("status", "modified"),
+        previous_path=item.get("previous_filename"),
+        is_binary=not item.get("patch")
+        and item.get("status") != "renamed"
+        and item.get("additions", 0) == 0
+        and item.get("deletions", 0) == 0,
+    )
+
+
+def _patch_is_optional(item: dict) -> bool:
+    if item.get("patch"):
+        return False
+    additions = item.get("additions", 0)
+    deletions = item.get("deletions", 0)
+    return additions == 0 and deletions == 0
 
 
 async def _fetch_and_expand(github_client, repo, head_sha, f, max_lines):

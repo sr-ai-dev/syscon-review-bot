@@ -8,6 +8,7 @@ from src.github.reviewer import (
     filter_bot_reviews,
     format_split_request_body,
     format_review_body,
+    has_split_request_for_head,
     submit_split_request,
     submit_review,
 )
@@ -406,6 +407,20 @@ def test_hostile_llm_text_cannot_break_review_markdown_structure():
 
 
 class TestSplitRequest:
+    def test_detects_existing_split_request_only_for_same_head(self):
+        reviews = [
+            {"body": "ordinary"},
+            {
+                "body": (
+                    "## 🤖 AI 리뷰\n"
+                    "<!-- syscon-review-bot:split-request head_sha=abc123 -->"
+                )
+            },
+        ]
+
+        assert has_split_request_for_head(reviews, "abc123") is True
+        assert has_split_request_for_head(reviews, "def456") is False
+
     def test_formats_deterministic_policy_only_body(self):
         kwargs = {
             "effective_lines": 2840,
