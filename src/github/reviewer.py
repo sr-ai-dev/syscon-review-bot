@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from html import escape
 
 from src.github.client import GitHubClient
 from src.models.review import (
@@ -13,10 +14,12 @@ from src.models.review import (
     SpecStatus,
 )
 from src.review.decision import compute_decision
+from src.review.errors import ReviewInfraCategory, ReviewInfraError
 
 
 BOT_REVIEW_MARKER = "## 🤖 AI 리뷰"
 SPLIT_REQUEST_MARKER_PREFIX = "<!-- syscon-review-bot:split-request head_sha="
+MAX_GITHUB_REVIEW_BODY_CHARS = 60_000
 
 
 def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
@@ -26,6 +29,7 @@ def filter_bot_reviews(reviews: list[dict]) -> list[dict]:
 def _escape_table_cell(text: str | None) -> str:
     if not text:
         return ""
+    text = escape(text, quote=False).replace("`", "&#96;")
     text = text.replace("|", r"\|")
     return " ".join(text.split())
 
@@ -38,7 +42,7 @@ def _format_metric(value: int | float) -> str:
 
 def _format_inline_code(value: str) -> str:
     # Reason codes and paths are rendered as one line and cannot break the marker/body.
-    safe = " ".join(value.split()).replace("`", "'")
+    safe = escape(" ".join(value.split()), quote=False).replace("`", "&#96;")
     return f"`{safe}`"
 
 
@@ -56,7 +60,7 @@ def format_split_request_body(
 ) -> str:
     """Build the policy-only response used when a complete review cannot run."""
     reasons = ", ".join(_format_inline_code(code) for code in reason_codes)
-    safe_sha = "".join(head_sha.split()).replace("--", "")
+    safe_sha = "".join(character for character in head_sha if character.isalnum())
     lines = [
         BOT_REVIEW_MARKER,
         "",
@@ -127,7 +131,7 @@ _CATEGORY_LABEL = {
 
 def format_review_body(result: ReviewResult) -> str:
     decision = compute_decision(result)
-    lines = [BOT_REVIEW_MARKER, "", result.summary]
+    lines = [BOT_REVIEW_MARKER, "", _escape_table_cell(result.summary)]
 
     if result.spec_status == SpecStatus.MISSING:
         lines.extend([
@@ -233,6 +237,14 @@ def format_review_body(result: ReviewResult) -> str:
     return "\n".join(lines)
 
 
+def _validate_github_body(body: str) -> None:
+    if len(body) > MAX_GITHUB_REVIEW_BODY_CHARS:
+        raise ReviewInfraError(
+            ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+            "Formatted review exceeded the safe GitHub body limit",
+        )
+
+
 async def submit_review(
     client: GitHubClient,
     repo: str,
@@ -242,6 +254,7 @@ async def submit_review(
     # 기본 GITHUB_TOKEN은 GitHub 정책상 APPROVE 이벤트를 거부한다(422).
     # 봇의 결정은 본문 라벨로 노출하고, API 이벤트는 항상 COMMENT로 통일.
     body = format_review_body(result)
+    _validate_github_body(body)
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
         json_data={"body": body, "event": "COMMENT"},
@@ -274,6 +287,7 @@ async def submit_split_request(
         suggested_groups=suggested_groups,
         head_sha=head_sha,
     )
+    _validate_github_body(body)
     await client.post(
         f"/repos/{repo}/pulls/{pr_number}/reviews",
         json_data={"body": body, "event": "COMMENT"},

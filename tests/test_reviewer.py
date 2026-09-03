@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from unittest.mock import AsyncMock
 
@@ -20,6 +22,7 @@ from src.models.review import (
     SpecDocFinding,
     SpecStatus,
 )
+from src.review.errors import ReviewInfraError
 
 
 def _result_missing():
@@ -361,6 +364,46 @@ class TestSubmitReview:
             assert payload["event"] == "COMMENT"
             assert label in payload["body"]
 
+    @pytest.mark.asyncio
+    async def test_oversized_body_is_rejected_before_github_post(self):
+        client = AsyncMock()
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="x" * 61_000,
+        )
+
+        with pytest.raises(ReviewInfraError):
+            await submit_review(client, "owner/repo", 1, result)
+
+        client.post.assert_not_awaited()
+
+
+def test_hostile_llm_text_cannot_break_review_markdown_structure():
+    hostile = "value | next\n### injected `code` <details>"
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary=hostile,
+        mismatches=[
+            Mismatch(
+                file="src/a`b|c.py",
+                line=3,
+                description=hostile,
+                suggestion=hostile,
+            )
+        ],
+    )
+
+    body = format_review_body(result)
+
+    assert "\n### injected" not in body
+    assert "<details>" not in body
+    assert "&#96;code&#96;" in body
+    assert "src/a&#96;b\\|c.py" in body
+    mismatch_row = next(line for line in body.splitlines() if "위치:" in line)
+    assert len(re.findall(r"(?<!\\)\|", mismatch_row)) == 4
+
 
 class TestSplitRequest:
     def test_formats_deterministic_policy_only_body(self):
@@ -409,6 +452,24 @@ class TestSplitRequest:
         assert "1,200.5줄" in body
         assert "40.35개" in body
         assert "권장 분할 그룹" not in body
+
+    def test_escapes_paths_reasons_and_marker_values(self):
+        body = format_split_request_body(
+            effective_lines=1,
+            effective_files=1,
+            raw_diff_tokens=1,
+            max_effective_lines=2500,
+            max_effective_files=80,
+            max_raw_diff_tokens=100000,
+            reason_codes=["SIZE`LIMIT\n### injected"],
+            suggested_groups=[["src/a`b<details>.py\n### injected"]],
+            head_sha="abc-->\n### injected",
+        )
+
+        assert "\n### injected" not in body
+        assert "<details>" not in body
+        assert "head_sha=abc" in body
+        assert body.count("<!-- syscon-review-bot:split-request") == 1
 
     @pytest.mark.asyncio
     async def test_submits_exactly_one_comment_without_review_findings(self):
