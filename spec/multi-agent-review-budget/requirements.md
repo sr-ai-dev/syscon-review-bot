@@ -1,4 +1,4 @@
-# Multi-Agent PR Review PRD
+# Multi-Agent PR Review 요구사항
 
 ## 목적
 
@@ -50,4 +50,3 @@
 - PR당 비용을 $1 이하로 제한한다.
 - 상한 초과 시 LLM 호출 없이 분리를 안내한다.
 - 내부 agent 정보는 리뷰 본문에 노출하지 않는다.
-
