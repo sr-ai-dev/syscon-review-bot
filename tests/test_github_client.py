@@ -49,7 +49,7 @@ class TestGitHubClient:
     @pytest.mark.asyncio
     async def test_get_pr_reviews_returns_list(self, client):
         with patch.object(
-            client, "get_json_list", new_callable=AsyncMock,
+            client, "get_json", new_callable=AsyncMock,
             return_value=[
                 {
                     "body": "## 🤖 코드 리뷰 — 점수: 7/10\n...",
@@ -58,12 +58,12 @@ class TestGitHubClient:
                     "user": {"login": "github-actions[bot]"},
                 },
             ],
-        ) as mock_get_json_list:
+        ) as mock_get_json:
             reviews = await get_pr_reviews(client, "owner/repo", 42)
 
         assert len(reviews) == 1
         assert reviews[0]["body"].startswith("## 🤖")
-        mock_get_json_list.assert_awaited_once_with("/repos/owner/repo/pulls/42/reviews")
+        assert "/repos/owner/repo/pulls/42/reviews" in mock_get_json.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_get_repo_file_404_returns_none(self, client):

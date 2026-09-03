@@ -96,26 +96,3 @@ require_spec_files: true
 """
         cfg = load_config_from_yaml(yaml_text)
         assert cfg.require_spec_files is True
-
-    def test_repository_config_exposes_only_narrowing_cost_fields(self):
-        cfg = load_config_from_yaml(
-            """
-cost_control:
-  enabled: false
-  allowed_models: [untrusted]
-  hard_limit_usd: "0.50"
-  max_requests_per_pr: 6
-  max_completion_tokens_per_call: 2048
-  max_tool_result_tokens_per_call: 1024
-  max_history_tokens: 6000
-"""
-        )
-
-        assert cfg.cost_control is not None
-        assert str(cfg.cost_control.hard_limit_usd) == "0.50"
-        assert cfg.cost_control.max_requests_per_pr == 6
-        assert cfg.cost_control.max_completion_tokens_per_call == 2048
-        assert cfg.cost_control.max_tool_result_tokens_per_call == 1024
-        assert cfg.cost_control.max_history_tokens == 6000
-        assert not hasattr(cfg.cost_control, "enabled")
-        assert not hasattr(cfg.cost_control, "allowed_models")
