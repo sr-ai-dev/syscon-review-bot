@@ -41,6 +41,19 @@ def client():
 
 class TestGPTClient:
     @pytest.mark.asyncio
+    async def test_default_client_uses_terra(self):
+        default_client = GPTClient(api_key="test")
+        mock_response = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
+
+        with patch.object(
+            default_client._client.chat.completions, "create",
+            new_callable=AsyncMock, return_value=mock_response,
+        ) as mock_create:
+            await default_client.review("sys", "usr")
+
+        assert mock_create.call_args.kwargs["model"] == "gpt-5.6-terra"
+
+    @pytest.mark.asyncio
     async def test_review_returns_review_result(self, client):
         mock_response = AsyncMock()
         mock_response.choices = [AsyncMock()]

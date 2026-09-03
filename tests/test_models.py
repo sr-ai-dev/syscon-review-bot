@@ -15,6 +15,13 @@ from src.models.review import (
 from src.models.config import ReviewConfig, IgnoreConfig
 
 
+def test_default_review_config_keeps_repository_tools_available():
+    config = ReviewConfig()
+
+    assert config.enable_tool_use is True
+    assert config.reasoning_effort is None
+
+
 class TestMismatch:
     def test_create_with_location(self):
         m = Mismatch(

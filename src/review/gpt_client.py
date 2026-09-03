@@ -26,7 +26,7 @@ RETRYABLE_OPENAI_ERRORS = (
 
 
 class GPTClient:
-    def __init__(self, api_key: str, model: str = "gpt-5.4-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-5.6-terra"):
         self._client = AsyncOpenAI(api_key=api_key)
         self._default_model = model
 

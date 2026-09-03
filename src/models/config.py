@@ -19,5 +19,7 @@ class ReviewConfig(BaseModel):
     enable_tool_use: bool = True
     max_tool_iterations: int = 8
     confidence_threshold: int = 70
-    reasoning_effort: str | None = "high"  # "low"|"medium"|"high"|None. None=비활성. 사용 시 tools/temperature 비활성됨.
+    # Chat Completions에서는 reasoning_effort와 repository tools를 함께 쓰지 못한다.
+    # 기본값은 tools를 살리며, 필요하면 소비자 설정에서 reasoning을 명시한다.
+    reasoning_effort: str | None = None  # "low"|"medium"|"high"|None. None=tools 활성 가능.
     require_spec_files: bool = False

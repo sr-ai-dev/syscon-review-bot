@@ -71,7 +71,10 @@ jobs:
 
 ```yaml
 review:
-  model: gpt-5.4-mini    # 옵션 — 미설정 시 액션 input의 model 사용
+  model: gpt-5.6-terra   # 옵션 — 미설정 시 액션 input → GPTClient 기본값 순으로 사용
+
+# 기본값: repository tools 활성, 별도 reasoning effort 없음.
+# reasoning_effort: high # 설정하면 현재 Chat Completions 경로에서 repository tools가 비활성화됨
 
 require_spec_files: false # 옵션 — true면 spec/<기능명>/ 문서 요건 미충족 시 리뷰 차단
 
