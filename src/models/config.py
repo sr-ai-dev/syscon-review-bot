@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -8,18 +6,6 @@ class IgnoreConfig(BaseModel):
 
     files: list[str] = Field(default_factory=list)
     extensions: list[str] = Field(default_factory=list)
-
-
-class RepositoryCostConfig(BaseModel):
-    """Repository limits may only narrow the trusted action policy."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    hard_limit_usd: Decimal | None = Field(default=None, gt=0)
-    max_requests_per_pr: int | None = Field(default=None, gt=0)
-    max_completion_tokens_per_call: int | None = Field(default=None, gt=0)
-    max_tool_result_tokens_per_call: int | None = Field(default=None, gt=0)
-    max_history_tokens: int | None = Field(default=None, gt=0)
 
 
 class ReviewConfig(BaseModel):
@@ -31,11 +17,7 @@ class ReviewConfig(BaseModel):
     token_budget: int = 60000
     enable_judge: bool = False  # judge 1.c 룰이 부분→완전 잘못 승격하는 케이스 발견, 기본 OFF
     enable_tool_use: bool = True
-    # 기본 비용 계획이 $1 hard cap 안에 들어오도록 명시적으로 2회로 제한한다.
-    max_tool_iterations: int = 2
+    max_tool_iterations: int = 8
     confidence_threshold: int = 70
-    # Chat Completions에서는 reasoning_effort와 repository tools를 함께 쓰지 못한다.
-    # 기본값은 tools를 살리며, 필요하면 소비자 설정에서 reasoning을 명시한다.
-    reasoning_effort: str | None = None  # "low"|"medium"|"high"|None. None=tools 활성 가능.
+    reasoning_effort: str | None = "high"  # "low"|"medium"|"high"|None. None=비활성. 사용 시 tools/temperature 비활성됨.
     require_spec_files: bool = False
-    cost_control: RepositoryCostConfig | None = None
