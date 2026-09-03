@@ -2,7 +2,10 @@
 # 모든 항목 선택사항. 미지정 시 봇 기본값 동작.
 
 review:
-  # model: gpt-5.4-mini    # 미설정 시 액션 input의 model → GPTClient 기본값 순으로 적용
+  # model: gpt-5.6-terra    # 미설정 시 액션 input의 model → GPTClient 기본값 순으로 적용
+
+# 기본값은 repository tools를 사용하도록 reasoning effort를 비활성화합니다.
+# reasoning_effort: high   # 설정하면 현재 Chat Completions 경로에서 repository tools가 비활성화됩니다.
 
 # true로 설정하면 spec/<기능명>/ 문서 요건 미충족 시 리뷰를 차단합니다.
 # 기본값 false: spec 문서 없이도 아키텍처·코드 품질 리뷰를 진행합니다.

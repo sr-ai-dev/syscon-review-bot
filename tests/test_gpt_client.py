@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.review.gpt_client import GPTClient
 from src.models.review import ReviewResult, SpecStatus
+from src.models.review_pipeline import ReviewPartial
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
+from src.review.cost import CostLedger, CostPolicy, GPT_5_6_TERRA_PRICING
 
 
 MOCK_GPT_RESPONSE = json.dumps({
@@ -40,6 +42,49 @@ def client():
 
 
 class TestGPTClient:
+    @pytest.mark.asyncio
+    async def test_internal_review_partial_uses_strict_schema_and_parses_coverage(self):
+        gpt = GPTClient(api_key="x")
+        payload = json.dumps(
+            {
+                "unit_id": "shard-1",
+                "covered_paths": ["src/a.py"],
+                "spec_status": "present",
+                "aligned": True,
+                "summary": "ok",
+                "findings": [],
+                "prior_resolved": [],
+            }
+        )
+        response = _mock_msg(content=payload, finish_reason="stop")
+        gpt._client = MagicMock()
+        gpt._client.chat.completions.create = AsyncMock(return_value=response)
+
+        result = await gpt.review(
+            "sys", "usr", response_model=ReviewPartial
+        )
+
+        assert isinstance(result, ReviewPartial)
+        assert result.covered_paths == ["src/a.py"]
+        response_format = gpt._client.chat.completions.create.call_args.kwargs[
+            "response_format"
+        ]
+        assert response_format["json_schema"]["name"] == "review_partial"
+        assert response_format["json_schema"]["strict"] is True
+
+    @pytest.mark.asyncio
+    async def test_default_client_uses_terra(self):
+        default_client = GPTClient(api_key="test")
+        mock_response = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
+
+        with patch.object(
+            default_client._client.chat.completions, "create",
+            new_callable=AsyncMock, return_value=mock_response,
+        ) as mock_create:
+            await default_client.review("sys", "usr")
+
+        assert mock_create.call_args.kwargs["model"] == "gpt-5.6-terra"
+
     @pytest.mark.asyncio
     async def test_review_returns_review_result(self, client):
         mock_response = AsyncMock()
@@ -329,6 +374,68 @@ async def test_review_without_tool_executor_keeps_old_behavior():
     assert result.summary == "ok"
 
 
+@pytest.mark.asyncio
+async def test_metered_retry_reserves_each_physical_request(monkeypatch):
+    gpt = GPTClient(api_key="x")
+    rate_limit = openai.RateLimitError(
+        message="rate limited",
+        response=httpx.Response(
+            429,
+            request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+        ),
+        body=None,
+    )
+    success = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(
+        side_effect=[rate_limit, success]
+    )
+    monkeypatch.setattr("src.review.gpt_client.asyncio.sleep", AsyncMock())
+    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_6_TERRA_PRICING)
+
+    await gpt.review(
+        "sys",
+        "usr",
+        cost_ledger=ledger,
+        max_completion_tokens=32,
+    )
+
+    assert gpt._client.chat.completions.create.await_count == 2
+    assert ledger.usage_unknown_nusd > 0
+
+
+@pytest.mark.asyncio
+async def test_cost_policy_caps_tool_result_tokens():
+    gpt = GPTClient(api_key="x")
+    first = _mock_msg(
+        content=None,
+        tool_calls=[_mock_tool_call("c1", "read_file", {"path": "a.py"})],
+    )
+    final = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(side_effect=[first, final])
+    executor = AsyncMock()
+    executor.read_file.return_value = "large body " * 100
+    ledger = CostLedger(
+        CostPolicy(hard_limit_usd="10", max_tool_result_tokens_per_call=8),
+        GPT_5_6_TERRA_PRICING,
+    )
+
+    await gpt.review(
+        "sys",
+        "usr",
+        tool_executor=executor,
+        max_tool_iterations=2,
+        max_completion_tokens=32,
+        cost_ledger=ledger,
+    )
+
+    second_messages = gpt._client.chat.completions.create.await_args_list[1].kwargs["messages"]
+    tool_content = next(item["content"] for item in second_messages if item["role"] == "tool")
+    from src.review.token_counter import count_tokens
+    assert count_tokens(tool_content) <= 8
+
+
 def test_parse_rejects_extra_objects_outside_strict_json():
     gpt = GPTClient(api_key="x")
     content = (
@@ -437,3 +544,86 @@ async def test_review_no_reasoning_keeps_temperature():
 
     assert captured.get("temperature") == 0.1
     assert "reasoning_effort" not in captured
+
+
+@pytest.mark.asyncio
+async def test_review_caps_output_and_records_usage_in_shared_ledger():
+    gpt = GPTClient(api_key="x")
+    response = _mock_msg(content=json.dumps({
+        "spec_status": "present", "aligned": True, "summary": "ok",
+    }))
+    response.usage = SimpleNamespace(
+        prompt_tokens=1_000,
+        completion_tokens=100,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=250),
+    )
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(return_value=response)
+    ledger = CostLedger(CostPolicy(), GPT_5_6_TERRA_PRICING)
+
+    await gpt.review(
+        "sys",
+        "usr",
+        max_completion_tokens=2048,
+        cost_ledger=ledger,
+        cost_stage="single",
+    )
+
+    kwargs = gpt._client.chat.completions.create.call_args.kwargs
+    assert kwargs["max_completion_tokens"] == 2048
+    assert ledger.actual_nusd == 2_750_000
+    assert ledger.reserved_nusd == 0
+
+
+@pytest.mark.asyncio
+async def test_pre_reserved_request_consumes_reservation_and_retry_reserves_again(monkeypatch):
+    gpt = GPTClient(api_key="x")
+    rate_limit = openai.RateLimitError(
+        message="rate limited",
+        response=httpx.Response(
+            429,
+            request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+        ),
+        body=None,
+    )
+    success = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(side_effect=[rate_limit, success])
+    monkeypatch.setattr("src.review.gpt_client.asyncio.sleep", AsyncMock())
+    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_6_TERRA_PRICING)
+    await ledger.reserve("synthesis-planned", 100_000_000)
+
+    await gpt.review(
+        "sys",
+        "usr",
+        cost_ledger=ledger,
+        max_completion_tokens=32,
+        pre_reserved_call_id="synthesis-planned",
+    )
+
+    assert gpt._client.chat.completions.create.await_count == 2
+    assert ledger.reserved_nusd == 0
+    assert ledger.usage_unknown_nusd > 100_000_000
+    assert ledger.actual_nusd == 0  # mock response has no usage
+
+
+@pytest.mark.asyncio
+async def test_tool_request_disables_parallel_tool_calls_and_rejects_multiple_calls():
+    gpt = GPTClient(api_key="x")
+    response = _mock_msg(
+        content=None,
+        tool_calls=[
+            _mock_tool_call("c1", "read_file", {"path": "a.py"}),
+            _mock_tool_call("c2", "read_file", {"path": "b.py"}),
+        ],
+    )
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(return_value=response)
+    executor = AsyncMock()
+
+    with pytest.raises(ReviewInfraError):
+        await gpt.review("sys", "usr", tool_executor=executor, max_tool_iterations=2)
+
+    kwargs = gpt._client.chat.completions.create.call_args.kwargs
+    assert kwargs["parallel_tool_calls"] is False
+    executor.read_file.assert_not_awaited()

@@ -15,6 +15,13 @@ from src.models.review import (
 from src.models.config import ReviewConfig, IgnoreConfig
 
 
+def test_default_review_config_keeps_repository_tools_available():
+    config = ReviewConfig()
+
+    assert config.enable_tool_use is True
+    assert config.reasoning_effort is None
+
+
 class TestMismatch:
     def test_create_with_location(self):
         m = Mismatch(
@@ -287,6 +294,18 @@ def test_quality_finding_confidence_field():
 def test_mismatch_confidence_defaults_to_70():
     m = Mismatch(file="a.py", line=1, description="d", suggestion="s")
     assert m.confidence == 70
+
+
+def test_scoped_finding_rejects_unknown_severity():
+    from src.models.review_pipeline import ScopedFinding
+
+    with pytest.raises(ValidationError):
+        ScopedFinding(
+            category="bug",
+            severity="urgent",
+            description="d",
+            suggestion="s",
+        )
 
 
 class TestDecisionEnum:
