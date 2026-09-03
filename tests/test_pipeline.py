@@ -207,6 +207,55 @@ async def test_multi_pipeline_uses_shared_ledger_and_returns_one_final_result():
 
 
 @pytest.mark.asyncio
+async def test_multi_pipeline_includes_planned_shared_context_in_every_shard_prompt():
+    files = [
+        FileDiff(
+            path="pyproject.toml",
+            patch="@@ -1 +1 @@\n-old-root-setting\n+shared-root-setting\n",
+            additions=1,
+            deletions=1,
+        ),
+        *_files(2),
+    ]
+    plan = build_review_plan(
+        files,
+        policy=SizeRoutingPolicy(single_max_tokens=1, max_tokens_per_shard=30_000),
+        token_counter=len,
+    )
+    assert plan.route is ReviewRoute.MULTI
+    assert all("pyproject.toml" in unit.shared_context_paths for unit in plan.units)
+    shard_prompts: dict[int, str] = {}
+
+    async def review(system_prompt, user_prompt, **kwargs):
+        stage = kwargs["cost_stage"]
+        if stage == "synthesis":
+            return _result("final")
+        index = int(stage.split("-")[-1])
+        if index <= len(plan.units):
+            shard_prompts[index] = user_prompt
+            unit = plan.units[index - 1]
+            return _partial(unit.unit_id, unit.paths)
+        return _partial("global", plan.coverage.required_paths)
+
+    await run_review_pipeline(
+        plan=plan,
+        files=files,
+        gpt_client=type("FakeGPT", (), {"review": staticmethod(review)})(),
+        system_prompt="system",
+        pr_title="title",
+        pr_body="body",
+        base_branch="develop",
+        head_branch="bugfix/develop/shared-context",
+        model="gpt-5.6-terra",
+        cost_policy=CostPolicy(hard_limit_usd="1"),
+        max_tool_iterations=1,
+    )
+
+    assert len(shard_prompts) == len(plan.units)
+    assert all("shared-root-setting" in prompt for prompt in shard_prompts.values())
+
+
+@pytest.mark.asyncio
 async def test_pipeline_rejects_cost_before_first_model_call():
     files = _files(1)
     plan = build_review_plan(files)

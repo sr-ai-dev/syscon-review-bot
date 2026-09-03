@@ -416,7 +416,13 @@ async def run_review_pipeline(
         prompts = []
         for unit in plan.units:
             owned = [by_path[path] for path in unit.paths]
-            scoped_files = list({item.path: item for item in [*shared_docs, *owned]}.values())
+            planned_context = [by_path[path] for path in unit.shared_context_paths]
+            scoped_files = list(
+                {
+                    item.path: item
+                    for item in [*shared_docs, *planned_context, *owned]
+                }.values()
+            )
             base_prompt = build_user_prompt(
                 files=scoped_files,
                 pr_title=pr_title,
