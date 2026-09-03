@@ -217,8 +217,39 @@ async def review_pr(
     ]
 
     if not files:
-        logger.info("Empty diff, skipping")
-        return ReviewRunResult(Decision.APPROVE)
+        if not inventory:
+            logger.info("Empty diff, skipping")
+            return ReviewRunResult(Decision.APPROVE)
+
+        measured_plan = build_review_plan(
+            inventory,
+            policy=size_policy,
+            head_sha=head_sha,
+            cost_ceiling_nusd=cost_policy.hard_limit_nusd,
+        )
+        split_plan = ReviewPlan(
+            route=ReviewRoute.SPLIT_REQUEST,
+            head_sha=head_sha,
+            metrics=measured_plan.metrics,
+            reason_code=RoutingReasonCode.INCOMPLETE_DIFF,
+            coverage=CoverageReport(
+                required_paths=sorted(item.path for item in inventory),
+                covered_paths=[],
+            ),
+            cost_ceiling_nusd=cost_policy.hard_limit_nusd,
+        )
+        if not dry_run:
+            await _submit_split_plan(
+                github_client,
+                context,
+                split_plan,
+                size_policy,
+                [RoutingReasonCode.INCOMPLETE_DIFF.value],
+            )
+        return ReviewRunResult(
+            Decision.REQUEST_CHANGES,
+            route=ReviewRoute.SPLIT_REQUEST,
+        )
 
     filtered = filter_files(files, config.ignore)
     if not filtered:

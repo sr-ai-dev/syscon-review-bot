@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from pydantic import BaseModel
@@ -91,7 +92,8 @@ def _synthesis_prompts(results: list[BaseModel], paths: list[str]) -> tuple[str,
     system = (
         "너는 PR 리뷰 통합기다. 입력된 내부 리뷰 결과만 병합하라. "
         "새 finding을 만들거나 기존 finding을 제거·재작성하지 마라. "
-        "file, line, category, description, spec_status, aligned를 그대로 유지하라. "
+        "file, line, category, description, suggestion, confidence, spec_status, aligned를 "
+        "값과 문자열을 재작성하지 말고 그대로 유지하라. "
         "category mismatch/spec_doc/architecture/advisory는 각 동명 결과 목록으로, "
         "bug/vulnerability/security/smell/complexity는 quality_findings로 옮겨라. "
         "최종 출력은 요구된 ReviewResult JSON schema를 정확히 지켜라. 한국어로 작성하라."
@@ -241,24 +243,26 @@ def _finding_key(category: str, finding: object) -> tuple:
         category,
         finding.file,
         finding.line,
-        _normalized_description(finding.description),
+        finding.description,
+        finding.suggestion,
+        finding.confidence,
     )
 
 
 def _validate_synthesis_result(
     result: ReviewResult, partial: ReviewPartial
 ) -> None:
-    expected = {
+    expected = Counter(
         _finding_key(finding.category.casefold(), finding)
         for finding in partial.findings
-    }
-    actual = {
+    )
+    actual = Counter([
         *(_finding_key("mismatch", finding) for finding in result.mismatches),
         *(_finding_key("spec_doc", finding) for finding in result.spec_doc_findings),
         *(_finding_key("architecture", finding) for finding in result.architecture_findings),
         *(_finding_key(finding.category.value, finding) for finding in result.quality_findings),
         *(_finding_key("advisory", finding) for finding in result.advisory_findings),
-    }
+    ])
     if actual != expected:
         raise ReviewInfraError(
             ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,

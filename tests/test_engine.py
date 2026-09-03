@@ -322,6 +322,34 @@ async def test_binary_and_rename_only_do_not_trigger_incomplete_diff(context, al
 
 
 @pytest.mark.asyncio
+async def test_only_binary_and_rename_changes_do_not_auto_approve(context):
+    diff = (
+        "diff --git a/assets/logo.png b/assets/logo.png\n"
+        "Binary files a/assets/logo.png and b/assets/logo.png differ\n"
+        "diff --git a/old.py b/new.py\n"
+        "similarity index 100%\nrename from old.py\nrename to new.py\n"
+    )
+    mock_github = _mock_github(diff=diff)
+    mock_github.get_json_list.return_value = [
+        {"filename": "assets/logo.png", "patch": None, "additions": 0, "deletions": 0, "status": "modified"},
+        {"filename": "new.py", "previous_filename": "old.py", "patch": None, "additions": 0, "deletions": 0, "status": "renamed"},
+    ]
+    mock_gpt = AsyncMock()
+
+    with patch(
+        "src.review.engine.load_repo_config",
+        new_callable=AsyncMock,
+        return_value=ReviewConfig(enable_tool_use=False),
+    ), _NO_EXPAND:
+        result = await review_pr(context, mock_github, mock_gpt)
+
+    assert result.decision is Decision.REQUEST_CHANGES
+    assert result.route is ReviewRoute.SPLIT_REQUEST
+    mock_gpt.review.assert_not_called()
+    assert "INCOMPLETE_DIFF" in mock_github.post.call_args.kwargs["json_data"]["body"]
+
+
+@pytest.mark.asyncio
 async def test_multi_review_is_internal_and_posts_one_normal_review(context, aligned_result):
     mock_github = _mock_github(
         diff=_large_diff(("src/auth/a.py", 700), ("src/orders/b.py", 700))

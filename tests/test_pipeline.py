@@ -10,6 +10,7 @@ from src.review.cost import CostPolicy
 from src.review.diff_parser import FileDiff
 from src.review.pipeline import (
     PreflightCostExceeded,
+    _validate_synthesis_result,
     reduce_review_results,
     run_review_pipeline,
 )
@@ -43,6 +44,91 @@ def _partial(unit_id: str, paths: list[str], summary: str = "ok") -> ReviewParti
         findings=[],
         prior_resolved=[],
     )
+
+
+@pytest.mark.parametrize(
+    ("description", "suggestion", "confidence"),
+    [
+        ("Required  finding", "apply exact fix", 90),
+        ("required finding", "different fix", 90),
+        ("required finding", "apply exact fix", 89),
+    ],
+)
+def test_synthesis_rejects_any_finding_field_mutation(
+    description: str, suggestion: str, confidence: int
+):
+    partial = ReviewPartial(
+        unit_id="reduced",
+        covered_paths=["a.py"],
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary="internal",
+        findings=[
+            ScopedFinding(
+                category="mismatch",
+                severity="high",
+                file="a.py",
+                line=1,
+                description="required finding",
+                suggestion="apply exact fix",
+                confidence=90,
+            )
+        ],
+    )
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary="final",
+        mismatches=[
+            Mismatch(
+                file="a.py",
+                line=1,
+                description=description,
+                suggestion=suggestion,
+                confidence=confidence,
+            )
+        ],
+    )
+
+    with pytest.raises(ReviewInfraError, match="changed the reviewed finding set"):
+        _validate_synthesis_result(result, partial)
+
+
+def test_synthesis_rejects_duplicate_finding():
+    partial = ReviewPartial(
+        unit_id="reduced",
+        covered_paths=["a.py"],
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary="internal",
+        findings=[
+            ScopedFinding(
+                category="mismatch",
+                severity="high",
+                file="a.py",
+                line=1,
+                description="required finding",
+                suggestion="apply exact fix",
+                confidence=90,
+            )
+        ],
+    )
+    finding = Mismatch(
+        file="a.py",
+        line=1,
+        description="required finding",
+        suggestion="apply exact fix",
+        confidence=90,
+    )
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary="final",
+        mismatches=[finding, finding.model_copy()],
+    )
+
+    with pytest.raises(ReviewInfraError, match="changed the reviewed finding set"):
+        _validate_synthesis_result(result, partial)
 
 
 def test_reducer_deduplicates_by_location_and_keeps_highest_confidence():
