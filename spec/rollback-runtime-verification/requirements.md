@@ -13,3 +13,4 @@
 
 - GitHub Actions의 `review` check가 성공한다.
 - Pull Request에 `github-actions[bot]` 리뷰가 게시된다.
+- 개선된 리뷰 실행이 선택한 route와 계산된 비용을 반환한다.
