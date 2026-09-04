@@ -1,10 +1,17 @@
+import re
+
 import pytest
 from unittest.mock import AsyncMock
 
 from src.github.reviewer import (
     BOT_REVIEW_MARKER,
     filter_bot_reviews,
+    format_split_request_body,
     format_review_body,
+    has_review_for_head,
+    has_split_request_for_head,
+    submit_spec_gate_review,
+    submit_split_request,
     submit_review,
 )
 from src.models.review import (
@@ -18,6 +25,7 @@ from src.models.review import (
     SpecDocFinding,
     SpecStatus,
 )
+from src.review.errors import ReviewInfraError
 
 
 def _result_missing():
@@ -303,17 +311,37 @@ class TestFormatReviewBodyPriorResolved:
 
 
 class TestFilterBotReviews:
-    def test_keeps_only_marker(self):
+    def test_requires_marker_and_github_actions_identity(self):
         raw = [
-            {"body": f"{BOT_REVIEW_MARKER}\nfoo"},
-            {"body": "looks good"},
-            {"body": f"{BOT_REVIEW_MARKER}\nbar"},
+            {
+                "body": f"{BOT_REVIEW_MARKER}\nfoo",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            },
+            {
+                "body": "looks good",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            },
+            {
+                "body": f"{BOT_REVIEW_MARKER}\nspoof",
+                "user": {"login": "alice", "type": "User"},
+            },
         ]
-        assert len(filter_bot_reviews(raw)) == 2
+        assert filter_bot_reviews(raw) == [raw[0]]
 
     def test_filter_matches_real_body(self):
         body = format_review_body(_result_aligned())
-        assert filter_bot_reviews([{"body": body}]) == [{"body": body}]
+        review = {
+            "body": body,
+            "author": {"login": "GitHub-Actions", "type": "Bot"},
+        }
+        assert filter_bot_reviews([review]) == [review]
+
+    def test_accepts_official_github_actions_user_id_variant(self):
+        review = {
+            "body": f"{BOT_REVIEW_MARKER}\nfoo",
+            "user": {"id": 41_898_282},
+        }
+        assert filter_bot_reviews([review]) == [review]
 
 
 def test_mismatch_renders_confidence_inside_item():
@@ -354,7 +382,205 @@ class TestSubmitReview:
         ]:
             client = AsyncMock()
             client.post = AsyncMock(return_value={"id": 1})
-            await submit_review(client, "owner/repo", 1, result)
+            await submit_review(client, "owner/repo", 1, result, "deadbeef")
             payload = client.post.call_args.kwargs["json_data"]
             assert payload["event"] == "COMMENT"
+            assert payload["commit_id"] == "deadbeef"
+            assert "kind=normal head_sha=deadbeef" in payload["body"]
             assert label in payload["body"]
+
+    @pytest.mark.asyncio
+    async def test_oversized_body_is_rejected_before_github_post(self):
+        client = AsyncMock()
+        result = ReviewResult(
+            spec_status=SpecStatus.PRESENT,
+            aligned=True,
+            summary="x" * 61_000,
+        )
+
+        with pytest.raises(ReviewInfraError):
+            await submit_review(client, "owner/repo", 1, result, "deadbeef")
+
+        client.post.assert_not_awaited()
+
+
+def test_hostile_llm_text_cannot_break_review_markdown_structure():
+    hostile = "value | next\n### injected `code` <details>"
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary=hostile,
+        mismatches=[
+            Mismatch(
+                file="src/a`b|c.py",
+                line=3,
+                description=hostile,
+                suggestion=hostile,
+            )
+        ],
+    )
+
+    body = format_review_body(result)
+
+    assert "\n### injected" not in body
+    assert "<details>" not in body
+    assert "&#96;code&#96;" in body
+    assert "src/a&#96;b\\|c.py" in body
+    mismatch_row = next(line for line in body.splitlines() if "위치:" in line)
+    assert len(re.findall(r"(?<!\\)\|", mismatch_row)) == 4
+
+
+class TestSplitRequest:
+    def test_detects_existing_split_request_only_for_same_head(self):
+        reviews = [
+            {"body": "ordinary"},
+            {
+                "body": (
+                    "## 🤖 AI 리뷰\n"
+                    "<!-- syscon-review-bot:split-request head_sha=abc123 -->"
+                ),
+                "user": {"login": "github-actions[bot]"},
+            },
+        ]
+
+        assert has_split_request_for_head(reviews, "abc123") is True
+        assert has_split_request_for_head(reviews, "def456") is False
+
+    def test_detects_review_kind_only_for_same_head(self):
+        reviews = [{
+            "body": (
+                "## 🤖 AI 리뷰\n"
+                "<!-- syscon-review-bot:review kind=normal head_sha=abc123 -->"
+            ),
+            "author": {"login": "github-actions[bot]"},
+        }]
+
+        assert has_review_for_head(reviews, "abc123", "normal") is True
+        assert has_review_for_head(reviews, "abc123", "spec-gate") is False
+        assert has_review_for_head(reviews, "def456", "normal") is False
+
+    def test_human_copied_markers_do_not_satisfy_idempotency(self):
+        reviews = [{
+            "body": (
+                "## 🤖 AI 리뷰\n"
+                "<!-- syscon-review-bot:split-request head_sha=abc123 -->\n"
+                "<!-- syscon-review-bot:review kind=normal head_sha=abc123 -->"
+            ),
+            "user": {"login": "alice", "type": "User"},
+        }]
+
+        assert has_split_request_for_head(reviews, "abc123") is False
+        assert has_review_for_head(reviews, "abc123", "normal") is False
+
+    def test_formats_deterministic_policy_only_body(self):
+        kwargs = {
+            "effective_lines": 2840,
+            "effective_files": 61,
+            "raw_diff_tokens": 112400,
+            "max_effective_lines": 2500,
+            "max_effective_files": 80,
+            "max_raw_diff_tokens": 100000,
+            "reason_codes": ["SIZE_LIMIT", "UNPACKABLE_CHANGE"],
+            "suggested_groups": [
+                ["services/auth/api.py", "tests/auth/test_api.py"],
+                ["packages/session/store.py"],
+            ],
+            "head_sha": "abc123def456",
+        }
+
+        first = format_split_request_body(**kwargs)
+        second = format_split_request_body(**kwargs)
+
+        assert first == second
+        assert first.startswith(BOT_REVIEW_MARKER)
+        assert "### 판정: 🚫 PR 분할 필요" in first
+        assert "가중 변경량 2,840줄 / 유효 파일 61개 / raw diff 112,400 tokens" in first
+        assert "가중 변경량 2,500줄 / 유효 파일 80개 / raw diff 100,000 tokens" in first
+        assert "`SIZE_LIMIT`, `UNPACKABLE_CHANGE`" in first
+        assert "그룹 1: `services/auth/api.py`, `tests/auth/test_api.py`" in first
+        assert "그룹 2: `packages/session/store.py`" in first
+        assert "<!-- syscon-review-bot:split-request head_sha=abc123def456 -->" in first
+        assert "finding" not in first.lower()
+
+    def test_formats_fractional_weighted_metrics_without_float_noise(self):
+        body = format_split_request_body(
+            effective_lines=1200.5,
+            effective_files=40.35,
+            raw_diff_tokens=40001,
+            max_effective_lines=2500,
+            max_effective_files=80,
+            max_raw_diff_tokens=100000,
+            reason_codes=["SIZE_LIMIT"],
+            suggested_groups=[],
+            head_sha="deadbeef",
+        )
+
+        assert "1,200.5줄" in body
+        assert "40.35개" in body
+        assert "권장 분할 그룹" not in body
+
+    def test_escapes_paths_reasons_and_marker_values(self):
+        body = format_split_request_body(
+            effective_lines=1,
+            effective_files=1,
+            raw_diff_tokens=1,
+            max_effective_lines=2500,
+            max_effective_files=80,
+            max_raw_diff_tokens=100000,
+            reason_codes=["SIZE`LIMIT\n### injected"],
+            suggested_groups=[["src/a`b<details>.py\n### injected"]],
+            head_sha="abc-->\n### injected",
+        )
+
+        assert "\n### injected" not in body
+        assert "<details>" not in body
+        assert "head_sha=abc" in body
+        assert body.count("<!-- syscon-review-bot:split-request") == 1
+
+    @pytest.mark.asyncio
+    async def test_submits_exactly_one_comment_without_review_findings(self):
+        client = AsyncMock()
+        client.post = AsyncMock(return_value={"id": 1})
+
+        await submit_split_request(
+            client,
+            "owner/repo",
+            7,
+            effective_lines=2840,
+            effective_files=61,
+            raw_diff_tokens=112400,
+            max_effective_lines=2500,
+            max_effective_files=80,
+            max_raw_diff_tokens=100000,
+            reason_codes=["COST_PREFLIGHT_EXCEEDED"],
+            suggested_groups=[["src/a.py"], ["src/b.py"]],
+            head_sha="abc123",
+        )
+
+        client.post.assert_awaited_once()
+        assert client.post.call_args.args == ("/repos/owner/repo/pulls/7/reviews",)
+        payload = client.post.call_args.kwargs["json_data"]
+        assert payload["event"] == "COMMENT"
+        assert payload["commit_id"] == "abc123"
+        assert "COST_PREFLIGHT_EXCEEDED" in payload["body"]
+        assert "abc123" in payload["body"]
+
+
+@pytest.mark.asyncio
+async def test_spec_gate_review_binds_snapshot_and_escapes_reason():
+    client = AsyncMock()
+    client.post = AsyncMock(return_value={"id": 1})
+
+    await submit_spec_gate_review(
+        client,
+        "owner/repo",
+        7,
+        "missing\n### injected <details>",
+        "abc123",
+    )
+
+    payload = client.post.call_args.kwargs["json_data"]
+    assert payload["commit_id"] == "abc123"
+    assert "kind=spec-gate head_sha=abc123" in payload["body"]
+    assert "\n### injected" not in payload["body"]
+    assert "<details>" not in payload["body"]

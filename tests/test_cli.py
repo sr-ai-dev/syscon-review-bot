@@ -8,6 +8,7 @@ from src.cli import main
 from src.models.review import Decision
 from src.review.engine import ReviewRunResult
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
+from src.models.review_pipeline import ReviewRoute
 
 
 class TestCli:
@@ -177,3 +178,42 @@ class TestCli:
             await main()
 
         assert mock_review.call_args.kwargs["model_override"] == "gpt-5-mini"
+
+    @pytest.mark.asyncio
+    async def test_trusted_cost_inputs_propagate_to_review_pr(self, event_file, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("REVIEW_MAX_COST_USD", "0.50")
+        monkeypatch.setenv("REVIEW_MAX_COMPLETION_TOKENS", "2048")
+
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = ReviewRunResult(
+                Decision.APPROVE, route=ReviewRoute.SINGLE, cost_nusd=125_000_000
+            )
+            assert await main() == 0
+
+        policy = mock_review.call_args.kwargs["cost_policy"]
+        assert str(policy.hard_limit_usd) == "0.50"
+        assert not hasattr(policy, "max_requests_per_pr")
+        assert policy.max_completion_tokens_per_call == 2048
+
+    @pytest.mark.asyncio
+    async def test_review_summary_contains_route_and_cost(self, event_file, monkeypatch, tmp_path):
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.return_value = ReviewRunResult(
+                Decision.APPROVE, route=ReviewRoute.MULTI, cost_nusd=125_000_000
+            )
+            assert await main() == 0
+
+        summary = summary_path.read_text()
+        assert "multi" in summary
+        assert "$0.125000" in summary

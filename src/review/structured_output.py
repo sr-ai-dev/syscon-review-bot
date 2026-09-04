@@ -2,6 +2,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.models.review import ReviewResult
+from src.models.review_pipeline import ReviewPartial
 
 
 def _make_strict(node: Any) -> None:
@@ -18,17 +19,24 @@ def _make_strict(node: Any) -> None:
             _make_strict(value)
 
 
-def build_review_response_format() -> dict[str, Any]:
-    schema = deepcopy(ReviewResult.model_json_schema())
+def build_model_response_format(model: type, name: str) -> dict[str, Any]:
+    schema = deepcopy(model.model_json_schema())
     _make_strict(schema)
     return {
         "type": "json_schema",
         "json_schema": {
-            "name": "review_result",
+            "name": name,
             "strict": True,
             "schema": schema,
         },
     }
 
 
+def build_review_response_format() -> dict[str, Any]:
+    return build_model_response_format(ReviewResult, "review_result")
+
+
 REVIEW_RESPONSE_FORMAT = build_review_response_format()
+REVIEW_PARTIAL_RESPONSE_FORMAT = build_model_response_format(
+    ReviewPartial, "review_partial"
+)

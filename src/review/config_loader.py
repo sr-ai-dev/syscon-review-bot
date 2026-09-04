@@ -2,7 +2,7 @@ import logging
 
 import yaml
 
-from src.models.config import IgnoreConfig, ReviewConfig
+from src.models.config import IgnoreConfig, RepositoryCostConfig, ReviewConfig
 
 
 logger = logging.getLogger(__name__)
@@ -37,13 +37,25 @@ def load_config_from_yaml(yaml_content: str) -> ReviewConfig:
         config_kwargs["max_expand_lines"] = data["max_expand_lines"]
     if "enable_tool_use" in data:
         config_kwargs["enable_tool_use"] = data["enable_tool_use"]
-    if "max_tool_iterations" in data:
-        config_kwargs["max_tool_iterations"] = data["max_tool_iterations"]
     if "confidence_threshold" in data:
         config_kwargs["confidence_threshold"] = data["confidence_threshold"]
     if "reasoning_effort" in data:
         config_kwargs["reasoning_effort"] = data["reasoning_effort"]
     if "require_spec_files" in data:
         config_kwargs["require_spec_files"] = data["require_spec_files"]
+    if isinstance(data.get("cost_control"), dict):
+        allowed_cost_keys = {
+            "hard_limit_usd",
+            "max_completion_tokens_per_call",
+            "max_tool_result_tokens_per_call",
+            "max_history_tokens",
+        }
+        config_kwargs["cost_control"] = RepositoryCostConfig(
+            **{
+                key: value
+                for key, value in data["cost_control"].items()
+                if key in allowed_cost_keys
+            }
+        )
 
     return ReviewConfig(**config_kwargs)

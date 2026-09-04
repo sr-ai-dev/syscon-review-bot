@@ -42,6 +42,43 @@ class TestParseDiff:
     def test_empty_diff_returns_empty_list(self):
         assert parse_diff("") == []
 
+    def test_parses_quoted_utf8_rename_destination_path(self):
+        diff = (
+            'diff --git "a/spec/old-\\352\\270\\260.md" '
+            '"b/spec/new-\\352\\270\\260.md"\n'
+            "similarity index 100%\n"
+            'rename from "spec/old-\\352\\270\\260.md"\n'
+            'rename to "spec/new-\\352\\270\\260.md"\n'
+        )
+
+        files = parse_diff(diff)
+
+        assert len(files) == 1
+        assert files[0].path == "spec/new-기.md"
+        assert files[0].previous_path == "spec/old-기.md"
+        assert files[0].status == "renamed"
+        assert files[0].patch == "rename from spec/old-기.md\nrename to spec/new-기.md"
+
+    def test_marks_binary_diff_without_treating_it_as_text_patch(self):
+        files = parse_diff(
+            "diff --git a/assets/logo.png b/assets/logo.png\n"
+            "Binary files a/assets/logo.png and b/assets/logo.png differ\n"
+        )
+
+        assert files[0].is_binary is True
+        assert files[0].patch == ""
+
+    def test_counts_content_lines_that_begin_with_multiple_signs(self):
+        files = parse_diff(
+            "diff --git a/a.txt b/a.txt\n"
+            "@@ -1 +1 @@\n"
+            "---removed content\n"
+            "+++added content\n"
+        )
+
+        assert files[0].additions == 1
+        assert files[0].deletions == 1
+
 
 class TestFilterFiles:
     def test_filter_by_extension(self):
@@ -96,6 +133,22 @@ class TestParsePrFiles:
 
     def test_empty_input(self):
         assert parse_pr_files([]) == []
+
+    def test_preserves_pure_rename_as_metadata_patch(self):
+        files = parse_pr_files([
+            {
+                "filename": "new.py",
+                "previous_filename": "old.py",
+                "patch": None,
+                "additions": 0,
+                "deletions": 0,
+                "status": "renamed",
+            }
+        ])
+
+        assert files[0].path == "new.py"
+        assert files[0].previous_path == "old.py"
+        assert files[0].patch == "rename from old.py\nrename to new.py"
 
     def test_removed_files_included(self):
         raw = [
