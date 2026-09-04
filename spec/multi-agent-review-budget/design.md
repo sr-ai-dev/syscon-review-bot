@@ -119,6 +119,9 @@ shared context의 raw token은 모든 shard 입력 한도에 반복 반영한다
 class ReviewPartial(BaseModel):
     unit_id: str
     covered_paths: list[str]
+    spec_status: Literal["missing", "present"]
+    aligned: bool
+    summary: str
     findings: list[ScopedFinding]
     prior_resolved: list[str] = []
 
