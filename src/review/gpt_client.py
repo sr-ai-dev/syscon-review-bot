@@ -134,7 +134,6 @@ class GPTClient:
         user_prompt: str,
         model: str | None = None,
         tool_executor: ToolExecutor | None = None,
-        max_tool_iterations: int = 8,
         reasoning_effort: str | None = None,
         max_completion_tokens: int | None = None,
         cost_ledger: CostLedger | None = None,
@@ -150,6 +149,10 @@ class GPTClient:
 
         # reasoning_effort 사용 시 tool_executor 무시 (chat.completions API 제약)
         use_tools = tool_executor is not None and reasoning_effort is None
+        if use_tools and (cost_ledger is None or not cost_ledger.policy.enabled):
+            raise ValueError(
+                "an enabled cost_ledger is required when repository tools are enabled"
+            )
         response_format = (
             REVIEW_PARTIAL_RESPONSE_FORMAT
             if response_model is ReviewPartial
@@ -175,10 +178,12 @@ class GPTClient:
             )
             return self._parse_final_response(response, response_model)
 
-        for _ in range(max_tool_iterations):
+        tool_iteration = 0
+        while True:
+            tool_iteration += 1
             response = await self._metered_request(
                 cost_ledger=cost_ledger,
-                cost_stage=f"{cost_stage}:tool-{_ + 1}",
+                cost_stage=f"{cost_stage}:tool-{tool_iteration}",
                 max_completion_tokens=max_completion_tokens,
                 model=chosen_model,
                 messages=messages,
@@ -187,7 +192,9 @@ class GPTClient:
                 tools=TOOL_SCHEMAS,
                 tool_choice="auto",
                 parallel_tool_calls=False,
-                pre_reserved_call_id=(pre_reserved_call_id if _ == 0 else None),
+                pre_reserved_call_id=(
+                    pre_reserved_call_id if tool_iteration == 1 else None
+                ),
             )
             choice, msg = self._choice_and_message(response)
             if not getattr(msg, "tool_calls", None):
@@ -228,11 +235,6 @@ class GPTClient:
                     "tool_call_id": tc.id,
                     "content": result_text,
                 })
-
-        raise ReviewInfraError(
-            ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE,
-            "OpenAI did not produce a final review within the tool iteration limit",
-        )
 
     @staticmethod
     def _choice_and_message(response):

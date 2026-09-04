@@ -37,7 +37,7 @@
 
 1. invalid JSON/Pydantic mismatch가 `RESPONSE_SCHEMA_ERROR`이고 response 원문이 exception
    문자열에 없는 실패 테스트를 작성한다.
-2. refusal/incomplete/max-tool-iteration이 `OPENAI_RESPONSE_INCOMPLETE`인 실패 테스트를
+2. refusal과 incomplete 응답이 `OPENAI_RESPONSE_INCOMPLETE`인 실패 테스트를
    작성한다.
 3. retry 소진 OpenAI exception이 `OPENAI_TRANSPORT_ERROR`인 실패 테스트를 작성한다.
 4. targeted test를 실행해 각각 예상 원인으로 RED인지 확인한다.

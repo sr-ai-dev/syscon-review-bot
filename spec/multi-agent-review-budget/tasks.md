@@ -20,6 +20,7 @@
 - [x] 공유 `CostLedger`의 reserve/reconcile을 구현한다.
 - [x] usage 누락, retry, 실제 비용 초과 처리를 구현한다.
 - [x] PR 설정이 trusted 비용 정책을 완화하지 못하는 테스트를 작성한다.
+- [x] 고정 요청 횟수 상한을 제거하고 PR당 hard cost limit만 적용한다.
 
 ## 3. 병렬 리뷰와 통합
 
@@ -27,6 +28,7 @@
 - [x] shard/global reviewer prompt를 구현한다.
 - [x] required unit 병렬 실행과 실패 전파를 구현한다.
 - [x] 결정론적 dedup, conflict, sort reducer 테스트를 작성한다.
+- [x] 재등장한 finding과 충돌하는 `prior_resolved` 제거 테스트를 작성하고 reducer를 수정한다.
 - [x] partial 결과를 최종 `ReviewResult` 하나로 통합한다.
 - [x] judge 이후 postprocess 순서를 보장한다.
 

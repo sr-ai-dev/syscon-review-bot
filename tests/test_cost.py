@@ -11,7 +11,6 @@ from src.review.cost import (
     CostLimitExceeded,
     CostPolicy,
     ModelPricing,
-    RequestLimitExceeded,
     ReservationInvariantExceeded,
     UnknownModelPricing,
     calculate_usage_cost_nusd,
@@ -83,7 +82,7 @@ def test_cost_policy_defaults_are_exact_and_strict():
     assert policy.warning_ratio == Decimal("0.80")
     assert policy.warning_nusd == 800_000_000
     assert policy.allowed_models == ("gpt-5.4-mini",)
-    assert policy.max_requests_per_pr == 12
+    assert not hasattr(policy, "max_requests_per_pr")
     assert policy.max_completion_tokens_per_call == 4096
     assert policy.max_tool_result_tokens_per_call == 4096
     assert policy.max_history_tokens == 12000
@@ -94,11 +93,11 @@ def test_cost_policy_defaults_are_exact_and_strict():
     [
         {"hard_limit_usd": 1.0},
         {"hard_limit_usd": "0"},
+        {"hard_limit_usd": "1.000000001"},
         {"warning_ratio": "1.01"},
         {"preflight_margin_bps": -1},
         {"preflight_margin_bps": 10_001},
         {"allowed_models": ()},
-        {"max_requests_per_pr": True},
         {"max_completion_tokens_per_call": 0},
     ],
 )
@@ -131,14 +130,12 @@ def test_repository_cost_config_can_only_narrow_trusted_policy():
         enabled=True,
         hard_limit_usd="1.00",
         allowed_models=("gpt-5.4-mini",),
-        max_requests_per_pr=12,
         max_completion_tokens_per_call=4096,
         max_tool_result_tokens_per_call=4096,
         max_history_tokens=12000,
     )
     repository = RepositoryCostConfig(
         hard_limit_usd="0.50",
-        max_requests_per_pr=6,
         max_completion_tokens_per_call=2048,
         max_tool_result_tokens_per_call=1024,
         max_history_tokens=6000,
@@ -151,7 +148,6 @@ def test_repository_cost_config_can_only_narrow_trusted_policy():
     assert effective.allowed_models == trusted.allowed_models
     assert effective.preflight_margin_bps == trusted.preflight_margin_bps
     assert effective.warning_ratio == trusted.warning_ratio
-    assert effective.max_requests_per_pr == 6
     assert effective.max_completion_tokens_per_call == 2048
     assert effective.max_tool_result_tokens_per_call == 1024
     assert effective.max_history_tokens == 6000
@@ -160,14 +156,12 @@ def test_repository_cost_config_can_only_narrow_trusted_policy():
 def test_repository_cost_config_cannot_raise_trusted_limits():
     trusted = CostPolicy(
         hard_limit_usd="0.25",
-        max_requests_per_pr=3,
         max_completion_tokens_per_call=512,
         max_tool_result_tokens_per_call=256,
         max_history_tokens=1000,
     )
     repository = RepositoryCostConfig(
         hard_limit_usd="9.00",
-        max_requests_per_pr=99,
         max_completion_tokens_per_call=9999,
         max_tool_result_tokens_per_call=9999,
         max_history_tokens=9999,
@@ -232,15 +226,15 @@ async def test_actual_over_reservation_fails_loudly_after_accounting_spend():
         await ledger.reserve("next", 1)
 
 
-async def test_ledger_enforces_request_limit_including_failed_attempts():
-    ledger = CostLedger(
-        CostPolicy(max_requests_per_pr=1), GPT_5_4_MINI_PRICING
-    )
-    await ledger.reserve("attempt-1", 10_000)
-    await ledger.reconcile("attempt-1", None, None, None)
+async def test_ledger_allows_more_than_twelve_requests_within_cost_limit():
+    ledger = CostLedger(CostPolicy(), GPT_5_4_MINI_PRICING)
 
-    with pytest.raises(RequestLimitExceeded):
-        await ledger.reserve("attempt-2", 10_000)
+    for index in range(13):
+        call_id = f"attempt-{index}"
+        await ledger.reserve(call_id, 10_000)
+        await ledger.reconcile(call_id, 1, 0, 1)
+
+    assert ledger.actual_nusd == 13 * 5_250
 
 
 async def test_partial_usage_is_invalid_and_keeps_reservation_active():

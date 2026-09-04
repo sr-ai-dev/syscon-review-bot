@@ -22,13 +22,9 @@ inputs:
     required: false
     default: '.github/review-bot.yml'
   max-review-cost-usd:
-    description: 'Trusted hard cost cap per PR in USD'
+    description: 'Hard cost cap per PR in USD; must be at most 1.00'
     required: false
     default: '1.00'
-  max-review-requests:
-    description: 'Maximum OpenAI requests per PR'
-    required: false
-    default: '12'
   max-completion-tokens:
     description: 'Maximum completion tokens per OpenAI request'
     required: false
@@ -54,7 +50,6 @@ runs:
         REVIEW_MODEL_OVERRIDE: ${{ inputs.model }}
         REVIEW_CONFIG_PATH: ${{ inputs.config-path }}
         REVIEW_MAX_COST_USD: ${{ inputs.max-review-cost-usd }}
-        REVIEW_MAX_REQUESTS: ${{ inputs.max-review-requests }}
         REVIEW_MAX_COMPLETION_TOKENS: ${{ inputs.max-completion-tokens }}
         PYTHONPATH: ${{ github.action_path }}
       run: python ${{ github.action_path }}/src/cli.py

@@ -47,7 +47,6 @@ from src.review.tool_executor import GitHubToolExecutor
 from src.review.cost import (
     CostLimitExceeded,
     CostPolicy,
-    RequestLimitExceeded,
     UnknownModelPricing,
 )
 from src.review.pipeline import PreflightCostExceeded, run_review_pipeline
@@ -369,7 +368,6 @@ async def review_pr(
             cost_policy=cost_policy,
             conversation_history=conversation_history,
             tool_executor=executor,
-            max_tool_iterations=config.max_tool_iterations,
             reasoning_effort=config.reasoning_effort,
             include_judge=config.enable_judge,
         )
@@ -384,7 +382,7 @@ async def review_pr(
                 reasoning_effort=config.reasoning_effort,
             )
         result = postprocess(result, threshold=config.confidence_threshold)
-    except (PreflightCostExceeded, CostLimitExceeded, RequestLimitExceeded, UnknownModelPricing) as exc:
+    except (PreflightCostExceeded, CostLimitExceeded, UnknownModelPricing) as exc:
         logger.warning("Review stopped by trusted cost policy: %s", type(exc).__name__)
         await _submit_split_plan(
             github_client,

@@ -8,7 +8,7 @@ class TestLoadConfig:
         assert DEFAULT_CONFIG.model is None
         assert DEFAULT_CONFIG.ignore.files == []
         assert DEFAULT_CONFIG.require_spec_files is False
-        assert DEFAULT_CONFIG.max_tool_iterations == 3
+        assert not hasattr(DEFAULT_CONFIG, "max_tool_iterations")
 
     def test_load_yaml_full(self):
         yaml_content = """
@@ -61,14 +61,12 @@ max_expand_lines: 80
         assert cfg.token_budget == 30000
         assert cfg.max_expand_lines == 80
 
-    def test_loads_tool_use_keys(self):
+    def test_loads_tool_use_key(self):
         yaml_text = """
 enable_tool_use: false
-max_tool_iterations: 4
 """
         cfg = load_config_from_yaml(yaml_text)
         assert cfg.enable_tool_use is False
-        assert cfg.max_tool_iterations == 4
 
     def test_loads_confidence_threshold_key(self):
         yaml_text = """
@@ -105,7 +103,6 @@ cost_control:
   enabled: false
   allowed_models: [untrusted]
   hard_limit_usd: "0.50"
-  max_requests_per_pr: 6
   max_completion_tokens_per_call: 2048
   max_tool_result_tokens_per_call: 1024
   max_history_tokens: 6000
@@ -114,7 +111,7 @@ cost_control:
 
         assert cfg.cost_control is not None
         assert str(cfg.cost_control.hard_limit_usd) == "0.50"
-        assert cfg.cost_control.max_requests_per_pr == 6
+        assert not hasattr(cfg.cost_control, "max_requests_per_pr")
         assert cfg.cost_control.max_completion_tokens_per_call == 2048
         assert cfg.cost_control.max_tool_result_tokens_per_call == 1024
         assert cfg.cost_control.max_history_tokens == 6000

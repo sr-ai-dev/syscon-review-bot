@@ -94,7 +94,6 @@ async def main() -> int:
     try:
         cost_policy = CostPolicy(
             hard_limit_usd=os.environ.get("REVIEW_MAX_COST_USD", "1.00"),
-            max_requests_per_pr=int(os.environ.get("REVIEW_MAX_REQUESTS", "12")),
             max_completion_tokens_per_call=int(
                 os.environ.get("REVIEW_MAX_COMPLETION_TOKENS", "4096")
             ),

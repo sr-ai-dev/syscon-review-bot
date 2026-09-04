@@ -29,14 +29,6 @@ class CostLimitExceeded(RuntimeError):
         )
 
 
-class RequestLimitExceeded(RuntimeError):
-    """Raised when a PR has used every request allowed by policy."""
-
-    def __init__(self, max_requests: int):
-        self.max_requests = max_requests
-        super().__init__(f"request count exceeds policy limit: {max_requests}")
-
-
 class ReservationInvariantExceeded(CostLimitExceeded):
     """Actual provider usage exceeded the reserved worst-case envelope.
 
@@ -202,7 +194,6 @@ class CostPolicy:
     warning_ratio: Decimal | str | int = Decimal("0.80")
     preflight_margin_bps: int = 1_500
     allowed_models: tuple[str, ...] = ("gpt-5.4-mini",)
-    max_requests_per_pr: int = 12
     max_completion_tokens_per_call: int = 4096
     max_tool_result_tokens_per_call: int = 4096
     max_history_tokens: int = 12000
@@ -216,6 +207,8 @@ class CostPolicy:
         hard_limit = _decimal(self.hard_limit_usd, "hard_limit_usd")
         if hard_limit <= 0:
             raise ValueError("hard_limit_usd must be positive")
+        if hard_limit > Decimal("1.00"):
+            raise ValueError("hard_limit_usd cannot exceed 1.00")
         hard_limit_nusd_decimal = hard_limit * NANO_USD_PER_USD
         if hard_limit_nusd_decimal != hard_limit_nusd_decimal.to_integral_value():
             raise ValueError("hard_limit_usd cannot have precision below one nano-USD")
@@ -237,7 +230,6 @@ class CostPolicy:
             raise ValueError("allowed_models cannot contain duplicates")
 
         for field_name in (
-            "max_requests_per_pr",
             "max_completion_tokens_per_call",
             "max_tool_result_tokens_per_call",
             "max_history_tokens",
@@ -278,9 +270,6 @@ class CostPolicy:
             warning_ratio=self.warning_ratio,
             preflight_margin_bps=self.preflight_margin_bps,
             allowed_models=self.allowed_models,
-            max_requests_per_pr=narrower(
-                "max_requests_per_pr", self.max_requests_per_pr
-            ),
             max_completion_tokens_per_call=narrower(
                 "max_completion_tokens_per_call",
                 self.max_completion_tokens_per_call,
@@ -352,11 +341,6 @@ class CostLedger:
         async with self._lock:
             if call_id in self._reservations or call_id in self._finalized_call_ids:
                 raise ValueError(f"call_id has already been used: {call_id}")
-            request_count = len(self._reservations) + len(self._finalized_call_ids)
-            if request_count >= self.policy.max_requests_per_pr:
-                error = RequestLimitExceeded(self.policy.max_requests_per_pr)
-                error.accounted_nusd = self.actual_nusd + self.usage_unknown_nusd
-                raise error
             available = self.remaining_nusd
             if self.policy.enabled and requested > available:
                 error = CostLimitExceeded(requested, available)

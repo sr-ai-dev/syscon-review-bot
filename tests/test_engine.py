@@ -688,7 +688,7 @@ async def test_review_pr_passes_unified_conversation_history(context, aligned_re
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -742,7 +742,7 @@ async def test_review_pr_excludes_bot_self_in_issue_comments(context, aligned_re
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -818,7 +818,7 @@ async def test_review_pr_includes_all_comments_regardless_of_timing(context, ali
     ]
     captured = {}
 
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -879,7 +879,7 @@ async def test_review_pr_expands_hunks_using_head_file_content(context, aligned_
     )
 
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
 
@@ -905,7 +905,7 @@ async def test_review_pr_requests_split_instead_of_reviewing_incomplete_diff(con
         "@@ -1,1 +1,1 @@\n+ok\n"
     )
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["user"] = user
         return aligned_result
     mock_github = _mock_github(diff=diff)
@@ -932,7 +932,7 @@ async def test_review_pr_runs_judge_when_enabled(context):
         architecture_findings=[ArchitectureFinding(description="X 잔존", suggestion="s")],
     )
     call_count = {"n": 0}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         call_count["n"] += 1
         return first if call_count["n"] == 1 else judged
 
@@ -952,7 +952,7 @@ async def test_review_pr_runs_judge_when_enabled(context):
 @pytest.mark.asyncio
 async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
     call_count = {"n": 0}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         call_count["n"] += 1
         return aligned_result
 
@@ -970,29 +970,29 @@ async def test_review_pr_skips_judge_when_disabled(context, aligned_result):
 @pytest.mark.asyncio
 async def test_review_pr_creates_tool_executor_when_enabled(context, aligned_result):
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["tool_executor"] = tool_executor
-        captured["max_tool_iterations"] = max_tool_iterations
+        captured["kwargs"] = kwargs
         return aligned_result
 
     mock_github = _mock_github()
     mock_gpt = AsyncMock()
     mock_gpt.review.side_effect = fake_review
 
-    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=True, max_tool_iterations=5, require_spec_files=False)), \
+    with patch("src.review.engine.load_repo_config", return_value=ReviewConfig(enable_tool_use=True, require_spec_files=False)), \
          _NO_EXPAND:
         await review_pr(context, mock_github, mock_gpt)
 
     assert captured["tool_executor"] is not None
     assert hasattr(captured["tool_executor"], "read_file")
     assert hasattr(captured["tool_executor"], "grep")
-    assert captured["max_tool_iterations"] == 5
+    assert "max_tool_iterations" not in captured["kwargs"]
 
 
 @pytest.mark.asyncio
 async def test_review_pr_omits_tool_executor_when_disabled(context, aligned_result):
     captured = {}
-    async def fake_review(system, user, model=None, tool_executor=None, max_tool_iterations=8, reasoning_effort="high", **kwargs):
+    async def fake_review(system, user, model=None, tool_executor=None, reasoning_effort="high", **kwargs):
         captured["tool_executor"] = tool_executor
         return aligned_result
 

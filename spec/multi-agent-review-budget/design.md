@@ -174,7 +174,6 @@ cost_control:
   warning_ratio: "0.80"
   preflight_margin_bps: 1500
   allowed_models: [gpt-5.4-mini]
-  max_requests_per_pr: 12
   max_completion_tokens_per_call: 4096
   max_tool_result_tokens_per_call: 4096
   max_history_tokens: 12000
@@ -186,16 +185,15 @@ PR 설정과 trusted policy가 모두 있으면 각 제한의 더 작은 값을 
 
 ### 4.3 실행 계획과 preflight
 
-첫 API 호출 전에 exact execution plan을 만든다.
+첫 API 호출 전에 최소 완전 리뷰 계획을 만든다.
 
 - reviewer unit과 역할
-- unit별 최대 API 요청 수
-- tool iteration과 tool result token 상한
+- 각 reviewer의 최초 모델 요청
 - judge 활성 여부
 - 최종 통합 호출
 - call별 input envelope와 output cap
 
-각 tool turn은 이전 message, assistant output 상한, tool result 상한이 누적된다고 계산한다. 계산 결과에 15% margin을 더한다. cache 할인은 적용하지 않는다.
+추가 tool turn은 고정 횟수로 제한하지 않는다. 매 요청 직전 누적 message와 tool result를 포함한 실제 payload envelope를 계산하고 공용 `CostLedger`에 예약한다. 계산 결과에 15% margin을 더한다. cache 할인은 적용하지 않는다.
 
 ```text
 preflight_cost = ceil(worst_case_call_costs × 1.15)

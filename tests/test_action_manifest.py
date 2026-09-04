@@ -27,8 +27,8 @@ def test_composite_action_dependencies_use_full_commit_sha() -> None:
 def test_composite_action_exposes_trusted_cost_controls() -> None:
     action_manifest = (REPOSITORY_ROOT / "action.yml").read_text(encoding="utf-8")
     assert "max-review-cost-usd:" in action_manifest
-    assert "max-review-requests:" in action_manifest
+    assert "max-review-requests:" not in action_manifest
     assert "max-completion-tokens:" in action_manifest
     assert "REVIEW_MAX_COST_USD:" in action_manifest
-    assert "REVIEW_MAX_REQUESTS:" in action_manifest
+    assert "REVIEW_MAX_REQUESTS:" not in action_manifest
     assert "REVIEW_MAX_COMPLETION_TOKENS:" in action_manifest

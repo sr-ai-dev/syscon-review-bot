@@ -40,7 +40,7 @@ formatting repair나 전체 review 재실행을 추가하면 PR당 비용과 지
 - AIO-AC-03: 정상 응답은 기존 `ReviewResult`와 동일하게 parsing된다.
 - AIO-AC-04: invalid JSON/Pydantic mismatch는 `RESPONSE_SCHEMA_ERROR` category의
   `ReviewInfraError`를 발생시킨다.
-- AIO-AC-05: refusal, length/content-filter incomplete, max tool iteration 소진은
+- AIO-AC-05: refusal과 length/content-filter incomplete 응답은
   `OPENAI_RESPONSE_INCOMPLETE`로 구분된다.
 - AIO-AC-06: retry 후에도 실패한 OpenAI transport/API 오류는
   `OPENAI_TRANSPORT_ERROR`로 구분된다.

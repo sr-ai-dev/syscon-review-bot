@@ -184,13 +184,53 @@ def test_partial_reducer_prefers_higher_severity_before_confidence():
     assert reduced.findings[0].suggestion == "critical"
 
 
+def test_partial_reducer_removes_prior_resolved_for_active_finding():
+    partial = _partial("one", ["a.py"])
+    partial.prior_resolved = ["(부분) same issue → 일부 개선, 남은 문제는 아래 참조"]
+    partial.findings = [
+        ScopedFinding(
+            category="bug",
+            severity="high",
+            file="a.py",
+            line=1,
+            description="same issue",
+            suggestion="finish fix",
+            confidence=90,
+        )
+    ]
+
+    reduced = reduce_review_partials([partial], ["a.py"])
+
+    assert reduced.prior_resolved == []
+
+
+def test_result_reducer_removes_prior_resolved_for_active_finding():
+    result = ReviewResult(
+        spec_status=SpecStatus.PRESENT,
+        aligned=False,
+        summary="active",
+        mismatches=[
+            Mismatch(
+                file="a.py",
+                line=1,
+                description="same issue",
+                suggestion="finish fix",
+                confidence=90,
+            )
+        ],
+        prior_resolved=["same issue → 이전 수정"],
+    )
+
+    reduced = reduce_review_results([result], ["a.py"])
+
+    assert reduced.prior_resolved == []
+
+
 def test_preflight_envelope_includes_schema_messages_and_tool_definition():
     plain = _request_envelopes(
         [("system", "user")],
         model="gpt-5.4-mini",
         output_cap=100,
-        tool_turns=1,
-        tool_result_cap=50,
         use_tools=False,
         reasoning_effort=None,
         include_synthesis=False,
@@ -200,8 +240,6 @@ def test_preflight_envelope_includes_schema_messages_and_tool_definition():
         [("system", "user")],
         model="gpt-5.4-mini",
         output_cap=100,
-        tool_turns=2,
-        tool_result_cap=50,
         use_tools=True,
         reasoning_effort=None,
         include_synthesis=False,
@@ -210,7 +248,7 @@ def test_preflight_envelope_includes_schema_messages_and_tool_definition():
 
     assert plain[0][0] > 100
     assert with_tools[0][0] > plain[0][0]
-    assert with_tools[1][0] == with_tools[0][0] + 100 + 50 + 128
+    assert len(with_tools) == 1
 
 
 def test_reducer_deduplicates_by_location_and_keeps_highest_confidence():
@@ -330,7 +368,6 @@ async def test_multi_pipeline_includes_planned_shared_context_in_every_shard_pro
         head_branch="bugfix/develop/shared-context",
         model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
-        max_tool_iterations=1,
     )
 
     assert len(shard_prompts) == len(plan.units)
@@ -395,7 +432,6 @@ async def test_multi_prompts_use_only_planned_context_and_include_full_manifest(
         head_branch="bugfix/develop/prompts",
         model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
-        max_tool_iterations=1,
     )
 
     assert all(path in prompt for prompt in shard_prompts.values() for path in paths)
@@ -438,7 +474,6 @@ async def test_global_reviewer_receives_bounded_patch_without_tools_in_reasoning
         cost_policy=CostPolicy(hard_limit_usd="1"),
         tool_executor=AsyncMock(),
         reasoning_effort="high",
-        max_tool_iterations=8,
     )
 
     assert "## 전역 변경 patch" in global_prompt
@@ -530,7 +565,6 @@ async def test_multi_pipeline_reserves_synthesis_before_starting_shards():
         head_branch="feature",
         model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
-        max_tool_iterations=1,
     )
 
     assert synthesis_reservation_seen
@@ -578,7 +612,6 @@ async def test_parallel_failure_cancels_and_awaits_siblings_then_releases_synthe
             head_branch="feature",
             model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
-            max_tool_iterations=1,
         )
 
     assert sibling_settled.is_set()
@@ -587,7 +620,7 @@ async def test_parallel_failure_cancels_and_awaits_siblings_then_releases_synthe
 
 
 @pytest.mark.asyncio
-async def test_reasoning_mode_preflight_matches_one_request_without_tools():
+async def test_reasoning_mode_omits_iteration_limit():
     files = _files(1)
     plan = build_review_plan(files)
     gpt = AsyncMock()
@@ -603,17 +636,16 @@ async def test_reasoning_mode_preflight_matches_one_request_without_tools():
         base_branch="main",
         head_branch="feature",
         model="gpt-5.4-mini",
-        cost_policy=CostPolicy(hard_limit_usd="1", max_requests_per_pr=1),
+        cost_policy=CostPolicy(hard_limit_usd="1"),
         tool_executor=AsyncMock(),
-        max_tool_iterations=8,
         reasoning_effort="high",
     )
 
-    assert gpt.review.call_args.kwargs["max_tool_iterations"] == 1
+    assert "max_tool_iterations" not in gpt.review.call_args.kwargs
 
 
 @pytest.mark.asyncio
-async def test_tool_plan_uses_configured_iteration_limit_without_reducing_it():
+async def test_tool_plan_has_no_iteration_limit_argument():
     files = _files(1)
     plan = build_review_plan(files)
     gpt = AsyncMock()
@@ -629,12 +661,11 @@ async def test_tool_plan_uses_configured_iteration_limit_without_reducing_it():
         base_branch="main",
         head_branch="feature",
         model="gpt-5.4-mini",
-        cost_policy=CostPolicy(hard_limit_usd="1", max_requests_per_pr=5),
+        cost_policy=CostPolicy(hard_limit_usd="1"),
         tool_executor=AsyncMock(),
-        max_tool_iterations=5,
     )
 
-    assert gpt.review.call_args.kwargs["max_tool_iterations"] == 5
+    assert "max_tool_iterations" not in gpt.review.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -677,7 +708,6 @@ async def test_multi_pipeline_rejects_finding_outside_shard_scope():
             head_branch="feature",
             model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
-            max_tool_iterations=1,
         )
 
     assert exc_info.value.category is ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
@@ -707,7 +737,6 @@ async def test_multi_pipeline_rejects_missing_attested_coverage():
             head_branch="feature",
             model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
-            max_tool_iterations=1,
         )
 
     assert exc_info.value.category is ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
@@ -753,7 +782,6 @@ async def test_synthesis_cannot_drop_an_internal_finding():
             head_branch="feature",
             model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
-            max_tool_iterations=1,
         )
 
     assert exc_info.value.category is ReviewInfraCategory.RESPONSE_SCHEMA_ERROR

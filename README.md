@@ -77,14 +77,13 @@ review:
 
 # 기본값: repository tools 활성, 별도 reasoning effort 없음.
 # reasoning_effort: high # 설정하면 현재 Chat Completions 경로에서 repository tools가 비활성화됨
-max_tool_iterations: 3  # 기본값. 높이면 preflight 비용 상한으로 리뷰가 중단될 수 있음
 
 require_spec_files: false # 옵션 — true면 spec/<기능명>/ 문서 요건 미충족 시 리뷰 차단
 
 # Action의 trusted 비용 상한보다 낮추는 것만 가능. 높은 값은 적용되지 않음.
+# reviewer/tool 호출 횟수는 고정 제한하지 않으며, 매 호출 전 누적 비용을 검사함.
 cost_control:
   hard_limit_usd: "0.50"
-  max_requests_per_pr: 8
   max_completion_tokens_per_call: 2048
   max_tool_result_tokens_per_call: 2048
   max_history_tokens: 6000
@@ -103,8 +102,7 @@ ignore:                  # 정합성 검토 대상에서 제외할 파일
 | `github-token` | no | `${{ github.token }}` | API 인증 토큰 (자동) |
 | `model` | no | `''` | 모델 강제 지정 (기본 trusted allowlist는 `gpt-5.4-mini`) |
 | `config-path` | no | `.github/review-bot.yml` | 설정 파일 경로 |
-| `max-review-cost-usd` | no | `1.00` | PR당 비용 hard cap |
-| `max-review-requests` | no | `12` | PR당 OpenAI 요청 상한 |
+| `max-review-cost-usd` | no | `1.00` | PR당 비용 hard cap (`1.00` 이하) |
 | `max-completion-tokens` | no | `4096` | 요청당 출력 토큰 상한 |
 
 ## 로컬 디버깅 (Dry Run)

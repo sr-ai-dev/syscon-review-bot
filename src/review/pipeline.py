@@ -142,6 +142,12 @@ def _normalized_description(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().casefold()
 
 
+def _normalized_prior_issue(value: str) -> str:
+    issue = value.split("→", 1)[0].strip()
+    issue = re.sub(r"^\(부분\)\s*", "", issue)
+    return _normalized_description(issue)
+
+
 def reduce_review_results(
     results: list[ReviewResult], paths: list[str]
 ) -> ReviewResult:
@@ -190,7 +196,7 @@ def reduce_review_results(
             item
             for result in results
             for item in result.prior_resolved
-            if _normalized_description(item) not in active_descriptions
+            if _normalized_prior_issue(item) not in active_descriptions
         )
     )
     return ReviewResult(
@@ -359,7 +365,7 @@ def reduce_review_partials(
             item
             for partial in partials
             for item in partial.prior_resolved
-            if _normalized_description(item) not in active
+            if _normalized_prior_issue(item) not in active
         )
     )
     return ReviewPartial(
@@ -417,8 +423,6 @@ def _request_envelopes(
     *,
     model: str,
     output_cap: int,
-    tool_turns: int,
-    tool_result_cap: int,
     use_tools: bool,
     reasoning_effort: str | None,
     include_synthesis: bool,
@@ -440,9 +444,7 @@ def _request_envelopes(
             reasoning_effort=reasoning_effort,
             response_format=response_format,
         )
-        for turn in range(tool_turns):
-            growth = turn * (output_cap + tool_result_cap + 128) if use_tools else 0
-            requests.append((base + growth, output_cap))
+        requests.append((base, output_cap))
     if include_synthesis:
         synthesis_system, synthesis_user = _synthesis_prompts([], synthesis_paths)
         synthesis_input = _request_payload_tokens(
@@ -489,7 +491,6 @@ async def run_review_pipeline(
     cost_policy: CostPolicy,
     conversation_history: list[str] | None = None,
     tool_executor: ToolExecutor | None = None,
-    max_tool_iterations: int = 8,
     reasoning_effort: str | None = None,
     include_judge: bool = False,
 ) -> PipelineOutcome:
@@ -515,7 +516,6 @@ async def run_review_pipeline(
         )
         prompts = [(system_prompt, user_prompt)]
         use_tools = tool_executor is not None and reasoning_effort is None
-        tool_turns = max_tool_iterations if use_tools else 1
         include_synthesis = False
     else:
         prompts = []
@@ -561,23 +561,18 @@ async def run_review_pipeline(
             )
         )
         use_tools = tool_executor is not None and reasoning_effort is None
-        tool_turns = max_tool_iterations if use_tools else 1
         include_synthesis = True
 
     requests = _request_envelopes(
         prompts,
         model=model,
         output_cap=output_cap,
-        tool_turns=tool_turns,
-        tool_result_cap=cost_policy.max_tool_result_tokens_per_call,
         use_tools=use_tools,
         reasoning_effort=reasoning_effort,
         include_synthesis=include_synthesis,
         synthesis_paths=plan.coverage.required_paths,
         include_judge=include_judge,
     )
-    if len(requests) > cost_policy.max_requests_per_pr:
-        raise PreflightCostExceeded(cost_policy.hard_limit_nusd + 1, cost_policy.hard_limit_nusd)
     estimate = estimate_preflight_nusd(
         requests, pricing, margin_bps=cost_policy.preflight_margin_bps
     )
@@ -590,7 +585,6 @@ async def run_review_pipeline(
             prompts[0][1],
             model=model,
             tool_executor=tool_executor,
-            max_tool_iterations=tool_turns,
             reasoning_effort=reasoning_effort,
             max_completion_tokens=output_cap,
             cost_ledger=ledger,
@@ -624,7 +618,6 @@ async def run_review_pipeline(
             prompt[1],
             model=model,
             tool_executor=tool_executor,
-            max_tool_iterations=tool_turns,
             reasoning_effort=reasoning_effort,
             max_completion_tokens=output_cap,
             cost_ledger=ledger,
@@ -654,7 +647,6 @@ async def run_review_pipeline(
             synthesis_user,
             model=model,
             tool_executor=None,
-            max_tool_iterations=1,
             reasoning_effort=reasoning_effort,
             max_completion_tokens=output_cap,
             cost_ledger=ledger,

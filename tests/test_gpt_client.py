@@ -9,7 +9,12 @@ from src.review.gpt_client import GPTClient
 from src.models.review import ReviewResult, SpecStatus
 from src.models.review_pipeline import ReviewPartial
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
-from src.review.cost import CostLedger, CostPolicy, GPT_5_4_MINI_PRICING
+from src.review.cost import (
+    CostLedger,
+    CostLimitExceeded,
+    CostPolicy,
+    GPT_5_4_MINI_PRICING,
+)
 
 
 MOCK_GPT_RESPONSE = json.dumps({
@@ -286,8 +291,11 @@ async def test_tool_use_loop_dispatches_then_returns_final():
 
     executor = AsyncMock()
     executor.read_file.return_value = "file body"
+    ledger = CostLedger(CostPolicy(), GPT_5_4_MINI_PRICING)
 
-    result = await gpt.review("sys", "usr", tool_executor=executor)
+    result = await gpt.review(
+        "sys", "usr", tool_executor=executor, cost_ledger=ledger
+    )
 
     assert call_counter["n"] == 2
     executor.read_file.assert_awaited_once_with("a.py")
@@ -300,24 +308,108 @@ async def test_tool_use_loop_dispatches_then_returns_final():
 
 
 @pytest.mark.asyncio
-async def test_tool_use_loop_respects_max_iterations():
+async def test_tool_use_loop_has_no_fixed_iteration_limit():
     gpt = GPTClient(api_key="x")
+    call_counter = {"n": 0}
 
-    async def always_tool(**kwargs):
-        tc = _mock_tool_call("c1", "read_file", {"path": "a.py"})
-        return _mock_msg(content=None, tool_calls=[tc])
+    async def nine_tools_then_final(**kwargs):
+        call_counter["n"] += 1
+        if call_counter["n"] <= 9:
+            tc = _mock_tool_call(f"c{call_counter['n']}", "read_file", {"path": "a.py"})
+            return _mock_msg(content=None, tool_calls=[tc])
+        return _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
 
     gpt._client = MagicMock()
-    gpt._client.chat.completions.create = AsyncMock(side_effect=always_tool)
+    gpt._client.chat.completions.create = AsyncMock(side_effect=nine_tools_then_final)
 
     executor = AsyncMock()
     executor.read_file.return_value = "x"
+    ledger = CostLedger(CostPolicy(), GPT_5_4_MINI_PRICING)
 
-    with pytest.raises(ReviewInfraError) as exc_info:
-        await gpt.review("sys", "usr", tool_executor=executor, max_tool_iterations=3)
+    result = await gpt.review(
+        "sys", "usr", tool_executor=executor, cost_ledger=ledger
+    )
 
-    assert exc_info.value.category == ReviewInfraCategory.OPENAI_RESPONSE_INCOMPLETE
-    assert gpt._client.chat.completions.create.await_count == 3
+    assert result.summary == "스펙 일부 누락"
+    assert gpt._client.chat.completions.create.await_count == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ledger",
+    [None, CostLedger(CostPolicy(enabled=False), GPT_5_4_MINI_PRICING)],
+)
+async def test_tool_use_requires_enabled_cost_ledger(ledger):
+    gpt = GPTClient(api_key="x")
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock()
+
+    with pytest.raises(ValueError, match="cost_ledger"):
+        await gpt.review(
+            "sys", "usr", tool_executor=AsyncMock(), cost_ledger=ledger
+        )
+
+    gpt._client.chat.completions.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_stops_before_request_that_exceeds_cost_limit():
+    gpt = GPTClient(api_key="x")
+    tool_response = _mock_msg(
+        content=None,
+        tool_calls=[_mock_tool_call("c1", "read_file", {"path": "a.py"})],
+    )
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(return_value=tool_response)
+    executor = AsyncMock()
+    executor.read_file.return_value = "x"
+    ledger = CostLedger(CostPolicy(hard_limit_usd="0.03"), GPT_5_4_MINI_PRICING)
+
+    with pytest.raises(CostLimitExceeded):
+        await gpt.review(
+            "sys",
+            "usr",
+            tool_executor=executor,
+            cost_ledger=ledger,
+            max_completion_tokens=4096,
+        )
+
+    assert gpt._client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_each_tool_turn_reserves_for_growing_message_payload():
+    gpt = GPTClient(api_key="x")
+    responses = [
+        _mock_msg(
+            content=None,
+            tool_calls=[_mock_tool_call("c1", "read_file", {"path": "a.py"})],
+        ),
+        _mock_msg(
+            content=None,
+            tool_calls=[_mock_tool_call("c2", "grep", {"pattern": "needle"})],
+        ),
+        _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop"),
+    ]
+    gpt._client = MagicMock()
+    gpt._client.chat.completions.create = AsyncMock(side_effect=responses)
+    executor = AsyncMock()
+    executor.read_file.return_value = "file body"
+    executor.grep.return_value = "a.py:1:needle"
+    ledger = CostLedger(CostPolicy(), GPT_5_4_MINI_PRICING)
+    ledger.reserve = AsyncMock(wraps=ledger.reserve)
+
+    await gpt.review(
+        "sys",
+        "usr",
+        tool_executor=executor,
+        cost_ledger=ledger,
+        max_completion_tokens=128,
+    )
+
+    ceilings = [call.args[1] for call in ledger.reserve.await_args_list]
+    assert len(ceilings) == 3
+    assert ceilings[0] < ceilings[1] < ceilings[2]
 
 
 @pytest.mark.asyncio
@@ -391,7 +483,7 @@ async def test_metered_retry_reserves_each_physical_request(monkeypatch):
         side_effect=[rate_limit, success]
     )
     monkeypatch.setattr("src.review.gpt_client.asyncio.sleep", AsyncMock())
-    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_4_MINI_PRICING)
+    ledger = CostLedger(CostPolicy(hard_limit_usd="1"), GPT_5_4_MINI_PRICING)
 
     await gpt.review(
         "sys",
@@ -417,7 +509,7 @@ async def test_cost_policy_caps_tool_result_tokens():
     executor = AsyncMock()
     executor.read_file.return_value = "large body " * 100
     ledger = CostLedger(
-        CostPolicy(hard_limit_usd="10", max_tool_result_tokens_per_call=8),
+        CostPolicy(hard_limit_usd="1", max_tool_result_tokens_per_call=8),
         GPT_5_4_MINI_PRICING,
     )
 
@@ -425,7 +517,6 @@ async def test_cost_policy_caps_tool_result_tokens():
         "sys",
         "usr",
         tool_executor=executor,
-        max_tool_iterations=2,
         max_completion_tokens=32,
         cost_ledger=ledger,
     )
@@ -590,7 +681,7 @@ async def test_pre_reserved_request_consumes_reservation_and_retry_reserves_agai
     gpt._client = MagicMock()
     gpt._client.chat.completions.create = AsyncMock(side_effect=[rate_limit, success])
     monkeypatch.setattr("src.review.gpt_client.asyncio.sleep", AsyncMock())
-    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_4_MINI_PRICING)
+    ledger = CostLedger(CostPolicy(hard_limit_usd="1"), GPT_5_4_MINI_PRICING)
     await ledger.reserve("synthesis-planned", 100_000_000)
 
     await gpt.review(
@@ -620,9 +711,12 @@ async def test_tool_request_disables_parallel_tool_calls_and_rejects_multiple_ca
     gpt._client = MagicMock()
     gpt._client.chat.completions.create = AsyncMock(return_value=response)
     executor = AsyncMock()
+    ledger = CostLedger(CostPolicy(), GPT_5_4_MINI_PRICING)
 
     with pytest.raises(ReviewInfraError):
-        await gpt.review("sys", "usr", tool_executor=executor, max_tool_iterations=2)
+        await gpt.review(
+            "sys", "usr", tool_executor=executor, cost_ledger=ledger
+        )
 
     kwargs = gpt._client.chat.completions.create.call_args.kwargs
     assert kwargs["parallel_tool_calls"] is False

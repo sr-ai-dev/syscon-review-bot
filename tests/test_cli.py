@@ -185,8 +185,7 @@ class TestCli:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
         monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        monkeypatch.setenv("REVIEW_MAX_COST_USD", "2.50")
-        monkeypatch.setenv("REVIEW_MAX_REQUESTS", "7")
+        monkeypatch.setenv("REVIEW_MAX_COST_USD", "0.50")
         monkeypatch.setenv("REVIEW_MAX_COMPLETION_TOKENS", "2048")
 
         with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
@@ -196,8 +195,8 @@ class TestCli:
             assert await main() == 0
 
         policy = mock_review.call_args.kwargs["cost_policy"]
-        assert str(policy.hard_limit_usd) == "2.50"
-        assert policy.max_requests_per_pr == 7
+        assert str(policy.hard_limit_usd) == "0.50"
+        assert not hasattr(policy, "max_requests_per_pr")
         assert policy.max_completion_tokens_per_call == 2048
 
     @pytest.mark.asyncio
