@@ -8,6 +8,7 @@ class TestLoadConfig:
         assert DEFAULT_CONFIG.model is None
         assert DEFAULT_CONFIG.ignore.files == []
         assert DEFAULT_CONFIG.require_spec_files is False
+        assert DEFAULT_CONFIG.max_tool_iterations == 3
 
     def test_load_yaml_full(self):
         yaml_content = """

@@ -31,8 +31,8 @@ class ReviewConfig(BaseModel):
     token_budget: int = 60000
     enable_judge: bool = False  # judge 1.c 룰이 부분→완전 잘못 승격하는 케이스 발견, 기본 OFF
     enable_tool_use: bool = True
-    # 기본 비용 계획이 $1 hard cap 안에 들어오도록 명시적으로 2회로 제한한다.
-    max_tool_iterations: int = 2
+    # 저장소 조회 뒤 최종 답변까지 생성할 수 있도록 3회의 모델 응답 기회를 제공한다.
+    max_tool_iterations: int = 3
     confidence_threshold: int = 70
     # Chat Completions에서는 reasoning_effort와 repository tools를 함께 쓰지 못한다.
     # 기본값은 tools를 살리며, 필요하면 소비자 설정에서 reasoning을 명시한다.
