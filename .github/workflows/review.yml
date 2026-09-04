@@ -15,6 +15,6 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: sr-ai-dev/syscon-review-bot@main
+      - uses: sr-ai-dev/syscon-review-bot@codex/review-bot-terra-development
         with:
           openai-key: ${{ secrets.OPENAI_API_KEY }}
