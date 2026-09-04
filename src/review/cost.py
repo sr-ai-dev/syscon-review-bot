@@ -110,17 +110,17 @@ class ModelPricing:
             raise ValueError("cached input price cannot exceed uncached input price")
 
 
-GPT_5_6_TERRA_PRICING = ModelPricing(
-    model="gpt-5.6-terra",
-    effective_from=date(2026, 9, 3),
-    version="2026-09-03",
-    uncached_input_nusd_per_token=2_000,
-    cached_input_nusd_per_token=200,
-    output_nusd_per_token=12_000,
+GPT_5_4_MINI_PRICING = ModelPricing(
+    model="gpt-5.4-mini",
+    effective_from=date(2026, 9, 4),
+    version="2026-09-04",
+    uncached_input_nusd_per_token=750,
+    cached_input_nusd_per_token=75,
+    output_nusd_per_token=4_500,
 )
 
 MODEL_PRICING: dict[str, ModelPricing] = {
-    GPT_5_6_TERRA_PRICING.model: GPT_5_6_TERRA_PRICING,
+    GPT_5_4_MINI_PRICING.model: GPT_5_4_MINI_PRICING,
 }
 
 
@@ -201,7 +201,7 @@ class CostPolicy:
     hard_limit_usd: Decimal | str | int = Decimal("1.00")
     warning_ratio: Decimal | str | int = Decimal("0.80")
     preflight_margin_bps: int = 1_500
-    allowed_models: tuple[str, ...] = ("gpt-5.6-terra",)
+    allowed_models: tuple[str, ...] = ("gpt-5.4-mini",)
     max_requests_per_pr: int = 12
     max_completion_tokens_per_call: int = 4096
     max_tool_result_tokens_per_call: int = 4096

@@ -13,7 +13,7 @@
 ## 2. 비용 원장
 
 - [x] 가격 계산과 `CostPolicy` validation 테스트를 작성한다.
-- [x] versioned Terra nano-USD 가격표를 구현한다.
+- [x] versioned nano-USD 가격표를 구현한다.
 - [x] conservative preflight estimator 테스트를 작성한다.
 - [x] output/tool/history 상한을 포함한 실행 plan estimator를 구현한다.
 - [x] 병렬 reservation 경쟁 테스트를 작성한다.

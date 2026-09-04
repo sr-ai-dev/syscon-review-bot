@@ -73,7 +73,7 @@ jobs:
 
 ```yaml
 review:
-  model: gpt-5.6-terra   # 옵션 — 미설정 시 액션 input → GPTClient 기본값 순으로 사용
+  model: gpt-5.4-mini   # 옵션 — 미설정 시 액션 input → GPTClient 기본값 순으로 사용
 
 # 기본값: repository tools 활성, 별도 reasoning effort 없음.
 # reasoning_effort: high # 설정하면 현재 Chat Completions 경로에서 repository tools가 비활성화됨
@@ -101,7 +101,7 @@ ignore:                  # 정합성 검토 대상에서 제외할 파일
 |------|----------|---------|-------------|
 | `openai-key` | yes | — | OpenAI API key |
 | `github-token` | no | `${{ github.token }}` | API 인증 토큰 (자동) |
-| `model` | no | `''` | 모델 강제 지정 (기본 trusted allowlist는 `gpt-5.6-terra`) |
+| `model` | no | `''` | 모델 강제 지정 (기본 trusted allowlist는 `gpt-5.4-mini`) |
 | `config-path` | no | `.github/review-bot.yml` | 설정 파일 경로 |
 | `max-review-cost-usd` | no | `1.00` | PR당 비용 hard cap |
 | `max-review-requests` | no | `12` | PR당 OpenAI 요청 상한 |

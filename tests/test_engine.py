@@ -766,14 +766,14 @@ async def test_review_pr_uses_config_model(context, aligned_result):
     mock_gpt = AsyncMock()
     mock_gpt.review.return_value = aligned_result
 
-    cfg = ReviewConfig(model="gpt-5.6-terra", require_spec_files=False)
+    cfg = ReviewConfig(model="gpt-5.4-mini", require_spec_files=False)
     with patch(
         "src.review.engine.load_repo_config",
         new_callable=AsyncMock, return_value=cfg,
     ), _NO_EXPAND:
         await review_pr(context=context, github_client=mock_github, gpt_client=mock_gpt)
 
-    assert mock_gpt.review.call_args.kwargs["model"] == "gpt-5.6-terra"
+    assert mock_gpt.review.call_args.kwargs["model"] == "gpt-5.4-mini"
 
 
 @pytest.mark.asyncio

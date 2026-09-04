@@ -9,7 +9,7 @@ from src.review.gpt_client import GPTClient
 from src.models.review import ReviewResult, SpecStatus
 from src.models.review_pipeline import ReviewPartial
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
-from src.review.cost import CostLedger, CostPolicy, GPT_5_6_TERRA_PRICING
+from src.review.cost import CostLedger, CostPolicy, GPT_5_4_MINI_PRICING
 
 
 MOCK_GPT_RESPONSE = json.dumps({
@@ -73,7 +73,7 @@ class TestGPTClient:
         assert response_format["json_schema"]["strict"] is True
 
     @pytest.mark.asyncio
-    async def test_default_client_uses_terra(self):
+    async def test_default_client_uses_gpt_5_4_mini(self):
         default_client = GPTClient(api_key="test")
         mock_response = _mock_msg(content=MOCK_GPT_RESPONSE, finish_reason="stop")
 
@@ -83,7 +83,7 @@ class TestGPTClient:
         ) as mock_create:
             await default_client.review("sys", "usr")
 
-        assert mock_create.call_args.kwargs["model"] == "gpt-5.6-terra"
+        assert mock_create.call_args.kwargs["model"] == "gpt-5.4-mini"
 
     @pytest.mark.asyncio
     async def test_review_returns_review_result(self, client):
@@ -391,7 +391,7 @@ async def test_metered_retry_reserves_each_physical_request(monkeypatch):
         side_effect=[rate_limit, success]
     )
     monkeypatch.setattr("src.review.gpt_client.asyncio.sleep", AsyncMock())
-    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_6_TERRA_PRICING)
+    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_4_MINI_PRICING)
 
     await gpt.review(
         "sys",
@@ -418,7 +418,7 @@ async def test_cost_policy_caps_tool_result_tokens():
     executor.read_file.return_value = "large body " * 100
     ledger = CostLedger(
         CostPolicy(hard_limit_usd="10", max_tool_result_tokens_per_call=8),
-        GPT_5_6_TERRA_PRICING,
+        GPT_5_4_MINI_PRICING,
     )
 
     await gpt.review(
@@ -559,7 +559,7 @@ async def test_review_caps_output_and_records_usage_in_shared_ledger():
     )
     gpt._client = MagicMock()
     gpt._client.chat.completions.create = AsyncMock(return_value=response)
-    ledger = CostLedger(CostPolicy(), GPT_5_6_TERRA_PRICING)
+    ledger = CostLedger(CostPolicy(), GPT_5_4_MINI_PRICING)
 
     await gpt.review(
         "sys",
@@ -571,7 +571,7 @@ async def test_review_caps_output_and_records_usage_in_shared_ledger():
 
     kwargs = gpt._client.chat.completions.create.call_args.kwargs
     assert kwargs["max_completion_tokens"] == 2048
-    assert ledger.actual_nusd == 2_750_000
+    assert ledger.actual_nusd == 1_031_250
     assert ledger.reserved_nusd == 0
 
 
@@ -590,7 +590,7 @@ async def test_pre_reserved_request_consumes_reservation_and_retry_reserves_agai
     gpt._client = MagicMock()
     gpt._client.chat.completions.create = AsyncMock(side_effect=[rate_limit, success])
     monkeypatch.setattr("src.review.gpt_client.asyncio.sleep", AsyncMock())
-    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_6_TERRA_PRICING)
+    ledger = CostLedger(CostPolicy(hard_limit_usd="10"), GPT_5_4_MINI_PRICING)
     await ledger.reserve("synthesis-planned", 100_000_000)
 
     await gpt.review(

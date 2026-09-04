@@ -148,19 +148,19 @@ required unit 하나라도 실패하면 결과 통합과 정상 리뷰 게시를
 
 ### 4.1 가격 표현
 
-부동소수점 대신 nano-USD 정수를 사용한다. 초기 `gpt-5.6-terra` 가격표:
+부동소수점 대신 nano-USD 정수를 사용한다. 초기 `gpt-5.4-mini` 가격표:
 
 ```text
-uncached input = 2,000 nUSD/token
-cached input   =   200 nUSD/token
-output         = 12,000 nUSD/token
+uncached input =   750 nUSD/token
+cached input   =    75 nUSD/token
+output         = 4,500 nUSD/token
 ```
 
 ```text
 cost_nusd =
-  (prompt_tokens - cached_tokens) × 2,000
-  + cached_tokens × 200
-  + completion_tokens × 12,000
+  (prompt_tokens - cached_tokens) × 750
+  + cached_tokens × 75
+  + completion_tokens × 4,500
 ```
 
 가격표에는 `model`, `effective_from`, `version`을 함께 저장한다. 비용 제어가 켜진 상태에서 가격을 모르는 모델은 실행하지 않는다.
@@ -173,7 +173,7 @@ cost_control:
   hard_limit_usd: "1.00"
   warning_ratio: "0.80"
   preflight_margin_bps: 1500
-  allowed_models: [gpt-5.6-terra]
+  allowed_models: [gpt-5.4-mini]
   max_requests_per_pr: 12
   max_completion_tokens_per_call: 4096
   max_tool_result_tokens_per_call: 4096

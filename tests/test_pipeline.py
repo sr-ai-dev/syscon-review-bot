@@ -187,7 +187,7 @@ def test_partial_reducer_prefers_higher_severity_before_confidence():
 def test_preflight_envelope_includes_schema_messages_and_tool_definition():
     plain = _request_envelopes(
         [("system", "user")],
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         output_cap=100,
         tool_turns=1,
         tool_result_cap=50,
@@ -198,7 +198,7 @@ def test_preflight_envelope_includes_schema_messages_and_tool_definition():
     )
     with_tools = _request_envelopes(
         [("system", "user")],
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         output_cap=100,
         tool_turns=2,
         tool_result_cap=50,
@@ -274,7 +274,7 @@ async def test_multi_pipeline_uses_shared_ledger_and_returns_one_final_result():
         pr_body="body",
         base_branch="main",
         head_branch="feature",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1.00"),
     )
 
@@ -328,7 +328,7 @@ async def test_multi_pipeline_includes_planned_shared_context_in_every_shard_pro
         pr_body="body",
         base_branch="develop",
         head_branch="bugfix/develop/shared-context",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
         max_tool_iterations=1,
     )
@@ -393,7 +393,7 @@ async def test_multi_prompts_use_only_planned_context_and_include_full_manifest(
         pr_body="body",
         base_branch="develop",
         head_branch="bugfix/develop/prompts",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
         max_tool_iterations=1,
     )
@@ -434,7 +434,7 @@ async def test_global_reviewer_receives_bounded_patch_without_tools_in_reasoning
         pr_body="body",
         base_branch="develop",
         head_branch="bugfix/develop/global-patch",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
         tool_executor=AsyncMock(),
         reasoning_effort="high",
@@ -461,7 +461,7 @@ async def test_pipeline_rejects_cost_before_first_model_call():
             pr_body="body",
             base_branch="main",
             head_branch="feature",
-            model="gpt-5.6-terra",
+            model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd=Decimal("0.000001")),
         )
 
@@ -484,7 +484,7 @@ async def test_pipeline_keeps_newest_history_within_token_cap():
         pr_body="body",
         base_branch="main",
         head_branch="feature",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1", max_history_tokens=6),
         conversation_history=["OLD " * 20, "NEW"],
     )
@@ -528,7 +528,7 @@ async def test_multi_pipeline_reserves_synthesis_before_starting_shards():
         pr_body="body",
         base_branch="main",
         head_branch="feature",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1"),
         max_tool_iterations=1,
     )
@@ -576,7 +576,7 @@ async def test_parallel_failure_cancels_and_awaits_siblings_then_releases_synthe
             pr_body="body",
             base_branch="main",
             head_branch="feature",
-            model="gpt-5.6-terra",
+            model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
             max_tool_iterations=1,
         )
@@ -602,7 +602,7 @@ async def test_reasoning_mode_preflight_matches_one_request_without_tools():
         pr_body="body",
         base_branch="main",
         head_branch="feature",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1", max_requests_per_pr=1),
         tool_executor=AsyncMock(),
         max_tool_iterations=8,
@@ -628,7 +628,7 @@ async def test_tool_plan_uses_configured_iteration_limit_without_reducing_it():
         pr_body="body",
         base_branch="main",
         head_branch="feature",
-        model="gpt-5.6-terra",
+        model="gpt-5.4-mini",
         cost_policy=CostPolicy(hard_limit_usd="1", max_requests_per_pr=5),
         tool_executor=AsyncMock(),
         max_tool_iterations=5,
@@ -675,7 +675,7 @@ async def test_multi_pipeline_rejects_finding_outside_shard_scope():
             pr_body="body",
             base_branch="main",
             head_branch="feature",
-            model="gpt-5.6-terra",
+            model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
             max_tool_iterations=1,
         )
@@ -705,7 +705,7 @@ async def test_multi_pipeline_rejects_missing_attested_coverage():
             pr_body="body",
             base_branch="main",
             head_branch="feature",
-            model="gpt-5.6-terra",
+            model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
             max_tool_iterations=1,
         )
@@ -751,7 +751,7 @@ async def test_synthesis_cannot_drop_an_internal_finding():
             pr_body="body",
             base_branch="main",
             head_branch="feature",
-            model="gpt-5.6-terra",
+            model="gpt-5.4-mini",
             cost_policy=CostPolicy(hard_limit_usd="1"),
             max_tool_iterations=1,
         )

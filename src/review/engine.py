@@ -130,7 +130,7 @@ async def review_pr(
     chosen_model = model_override or config.model
     if not chosen_model:
         default_model = getattr(gpt_client, "default_model", None)
-        chosen_model = default_model if isinstance(default_model, str) else "gpt-5.6-terra"
+        chosen_model = default_model if isinstance(default_model, str) else "gpt-5.4-mini"
 
     try:
         diff_text = await get_pr_diff(github_client, context.repo, context.pr_number)
