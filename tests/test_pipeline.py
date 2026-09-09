@@ -322,6 +322,13 @@ async def test_multi_pipeline_uses_shared_ledger_and_returns_one_final_result():
         call.kwargs["response_model"] is ReviewPartial
         for call in gpt.review.await_args_list[:3]
     )
+    assert all(
+        "ReviewPartial" in call.args[0] and "ReviewResult" not in call.args[0]
+        for call in gpt.review.await_args_list[:3]
+    )
+    assert gpt.review.await_args_list[3].kwargs["response_model"] is ReviewResult
+    assert "ReviewResult" in gpt.review.await_args_list[3].args[0]
+    assert "ReviewPartial" not in gpt.review.await_args_list[3].args[0]
     ledgers = [call.kwargs["cost_ledger"] for call in gpt.review.await_args_list]
     assert len({id(ledger) for ledger in ledgers}) == 1
 
@@ -372,6 +379,117 @@ async def test_multi_pipeline_includes_planned_shared_context_in_every_shard_pro
 
     assert len(shard_prompts) == len(plan.units)
     assert all("shared-root-setting" in prompt for prompt in shard_prompts.values())
+    assert all("참고 파일" in prompt for prompt in shard_prompts.values())
+    assert all(
+        "finding을 등록하지 마라" in prompt for prompt in shard_prompts.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_shard_prompt_does_not_reclassify_owned_shared_path_as_reference():
+    files = [
+        FileDiff(
+            path="docs/requirements.md",
+            patch="@@ -1 +1 @@\n-old requirement\n+owned requirement\n",
+            additions=1,
+            deletions=1,
+        ),
+        FileDiff(
+            path="pyproject.toml",
+            patch="@@ -1 +1 @@\n-old setting\n+reference setting\n",
+            additions=1,
+            deletions=1,
+        ),
+    ]
+    paths = [item.path for item in files]
+    metrics = ReviewSizeMetrics(
+        effective_lines=4,
+        effective_files=2,
+        effective_tokens=20,
+        raw_files=2,
+        raw_tokens=20,
+    )
+    plan = ReviewPlan(
+        route=ReviewRoute.MULTI,
+        metrics=metrics,
+        reason_code=RoutingReasonCode.REQUIRES_MULTI_REVIEW,
+        units=[
+            ReviewUnit(
+                unit_id="docs",
+                paths=[paths[0]],
+                effective_tokens=10,
+                shared_context_paths=paths,
+            ),
+            ReviewUnit(
+                unit_id="config",
+                paths=[paths[1]],
+                effective_tokens=10,
+            ),
+        ],
+        coverage=CoverageReport(required_paths=paths, covered_paths=paths),
+    )
+    shard_prompt = ""
+
+    async def review(system_prompt, user_prompt, **kwargs):
+        nonlocal shard_prompt
+        stage = kwargs["cost_stage"]
+        if stage == "analysis-1":
+            shard_prompt = user_prompt
+            return _partial("docs", [paths[0]])
+        if stage == "analysis-2":
+            return _partial("config", [paths[1]])
+        if stage == "analysis-3":
+            return _partial("global", paths)
+        return _result("final")
+
+    await run_review_pipeline(
+        plan=plan,
+        files=files,
+        gpt_client=type("FakeGPT", (), {"review": staticmethod(review)})(),
+        system_prompt="system",
+        pr_title="title",
+        pr_body="body",
+        base_branch="develop",
+        head_branch="bugfix/develop/reference-scope",
+        model="gpt-5.4-mini",
+        cost_policy=CostPolicy(hard_limit_usd="1"),
+    )
+
+    scope_section = shard_prompt.split("## 전체 변경 파일 manifest", 1)[0]
+    assert "담당 파일:\n- docs/requirements.md" in scope_section
+    assert "참고 파일:\n- pyproject.toml" in scope_section
+    assert "참고 파일:\n- docs/requirements.md" not in scope_section
+    assert "owned requirement" in shard_prompt
+
+
+@pytest.mark.asyncio
+async def test_single_parse_failure_has_single_stage_context():
+    files = _files(1)
+    plan = build_review_plan(files)
+    error = ReviewInfraError(
+        ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+        "Model response did not match the review schema",
+    )
+    gpt = AsyncMock()
+    gpt.review.side_effect = error
+
+    with pytest.raises(ReviewInfraError) as exc_info:
+        await run_review_pipeline(
+            plan=plan,
+            files=files,
+            gpt_client=gpt,
+            system_prompt="system",
+            pr_title="title",
+            pr_body="body",
+            base_branch="develop",
+            head_branch="bugfix/develop/diagnostics",
+            model="gpt-5.4-mini",
+            cost_policy=CostPolicy(hard_limit_usd="1"),
+        )
+
+    assert exc_info.value is error
+    assert exc_info.value.stage == "single"
+    assert exc_info.value.unit_id is None
 
 
 @pytest.mark.asyncio
@@ -711,6 +829,49 @@ async def test_multi_pipeline_rejects_finding_outside_shard_scope():
         )
 
     assert exc_info.value.category is ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
+    assert exc_info.value.stage == "analysis"
+    assert exc_info.value.unit_id == plan.units[0].unit_id
+
+
+@pytest.mark.asyncio
+async def test_multi_pipeline_parse_failure_uses_planned_analysis_unit_context():
+    files = _files(2)
+    plan = build_review_plan(
+        files,
+        policy=SizeRoutingPolicy(single_max_tokens=1, max_tokens_per_shard=30_000),
+        token_counter=len,
+    )
+    error = ReviewInfraError(
+        ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+        "Model response did not match the review schema",
+    )
+
+    async def review(*args, **kwargs):
+        index = int(kwargs["cost_stage"].split("-")[-1])
+        if index == 1:
+            raise error
+        if index <= len(plan.units):
+            unit = plan.units[index - 1]
+            return _partial(unit.unit_id, unit.paths)
+        return _partial("global", plan.coverage.required_paths)
+
+    with pytest.raises(ReviewInfraError) as exc_info:
+        await run_review_pipeline(
+            plan=plan,
+            files=files,
+            gpt_client=type("FakeGPT", (), {"review": staticmethod(review)})(),
+            system_prompt="system",
+            pr_title="title",
+            pr_body="body",
+            base_branch="develop",
+            head_branch="bugfix/develop/diagnostics",
+            model="gpt-5.4-mini",
+            cost_policy=CostPolicy(hard_limit_usd="1"),
+        )
+
+    assert exc_info.value is error
+    assert exc_info.value.stage == "analysis"
+    assert exc_info.value.unit_id == plan.units[0].unit_id
 
 
 @pytest.mark.asyncio
@@ -740,6 +901,8 @@ async def test_multi_pipeline_rejects_missing_attested_coverage():
         )
 
     assert exc_info.value.category is ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
+    assert exc_info.value.stage == "analysis"
+    assert exc_info.value.unit_id == plan.units[0].unit_id
 
 
 @pytest.mark.asyncio
@@ -785,3 +948,5 @@ async def test_synthesis_cannot_drop_an_internal_finding():
         )
 
     assert exc_info.value.category is ReviewInfraCategory.RESPONSE_SCHEMA_ERROR
+    assert exc_info.value.stage == "synthesis"
+    assert exc_info.value.unit_id is None

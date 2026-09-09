@@ -106,8 +106,70 @@ class TestCli:
         assert "REVIEW_INFRA_ERROR" in summary
         assert "RESPONSE_SCHEMA_ERROR" in summary
         assert "Code finding produced: no" in summary
+        assert error.safe_message in summary
+        assert error.safe_message in caplog.text
         assert "sk-test" not in summary
         assert "sk-test" not in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("stage", "unit_id", "reason"),
+        [
+            ("single", None, "Review response was not valid JSON"),
+            ("analysis", "shard-2", "Internal reviewer did not attest complete file coverage"),
+            ("analysis", "global", "Internal reviewer returned an unsupported finding category"),
+            ("synthesis", None, "Synthesis changed the reviewed finding set"),
+        ],
+    )
+    async def test_review_infra_error_preserves_safe_context_without_raw_cause(
+        self, event_file, monkeypatch, tmp_path, caplog, stage, unit_id, reason
+    ):
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+        error = ReviewInfraError(
+            ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+            reason,
+            stage=stage,
+            unit_id=unit_id,
+        )
+        error.__cause__ = ValueError("private-model-output sk-test ghs_x")
+        with patch("src.cli.review_pr", new_callable=AsyncMock) as mock_review:
+            mock_review.side_effect = error
+            exit_code = await main()
+
+        summary = summary_path.read_text()
+        assert exit_code == 1
+        for output in (summary, caplog.text):
+            assert reason in output
+            assert f'"stage": "{stage}"' in output
+            assert f'"unit_id": {json.dumps(unit_id)}' in output
+            assert "private-model-output" not in output
+            assert "sk-test" not in output
+            assert "ghs_x" not in output
+        assert "Review completed: no" in summary
+        assert "Code finding produced: no" in summary
+
+    def test_infra_diagnostic_escapes_summary_markup(self, monkeypatch, tmp_path):
+        from src.cli import _write_infra_summary
+
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        error = ReviewInfraError(
+            ReviewInfraCategory.GITHUB_TRANSPORT_ERROR,
+            "Failed config <details>&\n::error::extra line",
+        )
+        _write_infra_summary(error)
+
+        summary = summary_path.read_text()
+        assert "<details>" not in summary
+        assert "&lt;details&gt;&amp;" in summary
+        assert "\\n::error::extra line" in summary
+        assert "\n::error::extra line" not in summary
 
     @pytest.mark.asyncio
     async def test_non_pr_event_skipped(self, event_file, monkeypatch):

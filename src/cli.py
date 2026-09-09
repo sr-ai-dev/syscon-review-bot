@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from decimal import Decimal
+from html import escape
 from pathlib import Path
 
 from src.github.client import GitHubClient
@@ -24,6 +25,17 @@ logger = logging.getLogger("syscon-review-bot")
 REQUIRED_ENV = ("GITHUB_TOKEN", "GITHUB_EVENT_PATH", "GITHUB_EVENT_NAME", "OPENAI_API_KEY")
 
 
+def _infra_diagnostic(error: ReviewInfraError) -> str:
+    return json.dumps(
+        {
+            "reason": error.safe_message,
+            "stage": error.stage,
+            "unit_id": error.unit_id,
+        },
+        ensure_ascii=False,
+    )
+
+
 def _write_infra_summary(error: ReviewInfraError) -> None:
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
@@ -31,6 +43,7 @@ def _write_infra_summary(error: ReviewInfraError) -> None:
     summary = (
         "## REVIEW_INFRA_ERROR\n\n"
         f"- Category: `{error.category.value}`\n"
+        f"- Diagnostic: <code>{escape(_infra_diagnostic(error), quote=False)}</code>\n"
         "- Review completed: no\n"
         "- Code finding produced: no\n"
     )
@@ -122,10 +135,11 @@ async def main() -> int:
         return 0 if result.spec_gate_passed else 1
     except ReviewInfraError as exc:
         logger.error(
-            "REVIEW_INFRA_ERROR for %s#%s: %s",
+            "REVIEW_INFRA_ERROR for %s#%s: %s %s",
             repo,
             pr_number,
             exc.category.value,
+            _infra_diagnostic(exc),
         )
         _write_infra_summary(exc)
         return 1

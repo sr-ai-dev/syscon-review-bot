@@ -12,7 +12,16 @@ class ReviewInfraCategory(str, Enum):
 class ReviewInfraError(RuntimeError):
     """Safe, typed failure at the AI review infrastructure boundary."""
 
-    def __init__(self, category: ReviewInfraCategory, message: str):
+    def __init__(
+        self,
+        category: ReviewInfraCategory,
+        message: str,
+        *,
+        stage: str | None = None,
+        unit_id: str | None = None,
+    ):
         self.category = category
         self.safe_message = message
+        self.stage = stage
+        self.unit_id = unit_id
         super().__init__(f"{category.value}: {message}")
