@@ -1,8 +1,32 @@
-from src.review.prompt_builder import build_system_prompt, build_user_prompt
+from src.review.prompt_builder import (
+    build_analysis_system_prompt,
+    build_system_prompt,
+    build_user_prompt,
+)
 from src.review.diff_parser import FileDiff
 
 
 class TestBuildSystemPrompt:
+    def test_review_modes_share_criteria_but_use_distinct_output_contracts(self):
+        final_prompt = build_system_prompt()
+        partial_prompt = build_analysis_system_prompt()
+
+        assert "Blocker와 advisory 분류" in final_prompt
+        assert "Blocker와 advisory 분류" in partial_prompt
+        assert "ReviewResult" in final_prompt
+        assert "ReviewPartial" not in final_prompt
+        assert "ReviewPartial" in partial_prompt
+        assert "ReviewResult" not in partial_prompt
+        assert '"findings": [' in partial_prompt
+        for result_only_target in (
+            "spec_doc_findings",
+            "mismatches",
+            "architecture_findings",
+            "quality_findings",
+            "advisory_findings",
+        ):
+            assert result_only_target not in partial_prompt
+
     def test_states_role_is_spec_alignment_only(self):
         prompt = build_system_prompt()
         assert "정합성" in prompt

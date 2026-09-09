@@ -95,12 +95,15 @@ exception message에는 category와 고정된 안전 문구만 넣는다. GPT re
 
 ### 4.3 CLI summary
 
-`src/cli.py`는 `ReviewInfraError`를 별도로 catch한다. stderr에 category를 기록하고
-`GITHUB_STEP_SUMMARY`가 있으면 다음만 append한다.
+`src/cli.py`는 `ReviewInfraError`를 별도로 catch한다. stderr에 category와 안전한
+reason/stage/unit_id 진단을 기록하고 `GITHUB_STEP_SUMMARY`가 있으면 같은 진단을
+HTML 이스케이프하여 append한다. 응답 원문과 예외 체인은 출력하지 않는다.
+문맥 전파와 출력 계약 정렬은 `spec/multi-review-contract-diagnostics/design.md`를 따른다.
 
 ```text
 AI review infrastructure error
 Category: RESPONSE_SCHEMA_ERROR
+Diagnostic: {"reason": "Internal reviewer did not attest complete file coverage", "stage": "analysis", "unit_id": "shard-2"}
 Review completed: no
 Code finding produced: no
 ```

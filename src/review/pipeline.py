@@ -28,7 +28,7 @@ from src.review.diff_parser import FileDiff
 from src.review.errors import ReviewInfraCategory, ReviewInfraError
 from src.review.llm_tools import TOOL_SCHEMAS
 from src.review.judge_prompt import build_judge_system_prompt
-from src.review.prompt_builder import build_user_prompt
+from src.review.prompt_builder import build_analysis_system_prompt, build_user_prompt
 from src.review.structured_output import (
     REVIEW_PARTIAL_RESPONSE_FORMAT,
     REVIEW_RESPONSE_FORMAT,
@@ -68,14 +68,21 @@ def _trim_history(history: list[str] | None, max_tokens: int) -> list[str]:
 
 
 def _scoped_prompt(
-    base_prompt: str, unit_id: str, paths: list[str], all_paths: list[str]
+    base_prompt: str,
+    unit_id: str,
+    paths: list[str],
+    context_paths: list[str],
+    all_paths: list[str],
 ) -> str:
     scope = "\n".join(f"- {path}" for path in paths)
+    context = "\n".join(f"- {path}" for path in context_paths) or "- 없음"
     manifest = "\n".join(f"- {path}" for path in all_paths)
     return (
         f"## 내부 검토 범위\nunit: {unit_id}\n담당 파일:\n{scope}\n\n"
+        f"참고 파일:\n{context}\n\n"
         f"## 전체 변경 파일 manifest\n{manifest}\n\n"
-        "담당 파일의 상세 결함을 검토하라. 다른 파일은 관계 확인에만 사용하라. "
+        "담당 파일의 상세 결함을 검토하라. 참고 파일과 manifest의 다른 파일은 "
+        "관계 확인에만 사용하고 그 파일에 finding을 등록하지 마라. "
         f"unit_id는 {unit_id}, covered_paths는 위 담당 파일 전체를 그대로 반환하라. "
         "finding category는 mismatch/spec_doc/architecture/bug/vulnerability/security/"
         "smell/complexity/advisory 중 하나를 사용하라. "
@@ -519,9 +526,13 @@ async def run_review_pipeline(
         include_synthesis = False
     else:
         prompts = []
+        analysis_system_prompt = build_analysis_system_prompt()
         for unit in plan.units:
             owned = [by_path[path] for path in unit.paths]
-            planned_context = [by_path[path] for path in unit.shared_context_paths]
+            reference_paths = [
+                path for path in unit.shared_context_paths if path not in unit.paths
+            ]
+            planned_context = [by_path[path] for path in reference_paths]
             scoped_files = list(
                 {
                     item.path: item
@@ -537,18 +548,19 @@ async def run_review_pipeline(
             )
             prompts.append(
                 (
-                    system_prompt,
+                    analysis_system_prompt,
                     _scoped_prompt(
                         base_prompt,
                         unit.unit_id,
                         unit.paths,
+                        reference_paths,
                         plan.coverage.required_paths,
                     ),
                 )
             )
         prompts.append(
             (
-                system_prompt,
+                analysis_system_prompt,
                 _global_prompt(
                     pr_title=pr_title,
                     pr_body=pr_body,
@@ -580,16 +592,21 @@ async def run_review_pipeline(
         raise PreflightCostExceeded(estimate, cost_policy.hard_limit_nusd)
 
     if plan.route is ReviewRoute.SINGLE:
-        result = await gpt_client.review(
-            prompts[0][0],
-            prompts[0][1],
-            model=model,
-            tool_executor=tool_executor,
-            reasoning_effort=reasoning_effort,
-            max_completion_tokens=output_cap,
-            cost_ledger=ledger,
-            cost_stage="single",
-        )
+        try:
+            result = await gpt_client.review(
+                prompts[0][0],
+                prompts[0][1],
+                model=model,
+                tool_executor=tool_executor,
+                reasoning_effort=reasoning_effort,
+                max_completion_tokens=output_cap,
+                cost_ledger=ledger,
+                cost_stage="single",
+                response_model=ReviewResult,
+            )
+        except ReviewInfraError as exc:
+            exc.stage = "single"
+            raise
         return PipelineOutcome(result=result, ledger=ledger)
 
     synthesis_input, synthesis_output = requests[-(2 if include_judge else 1)]
@@ -613,23 +630,28 @@ async def run_review_pipeline(
             if index <= len(plan.units)
             else plan.coverage.required_paths
         )
-        partial = await gpt_client.review(
-            prompt[0],
-            prompt[1],
-            model=model,
-            tool_executor=tool_executor,
-            reasoning_effort=reasoning_effort,
-            max_completion_tokens=output_cap,
-            cost_ledger=ledger,
-            cost_stage=f"analysis-{index}",
-            response_model=ReviewPartial,
-        )
-        if not isinstance(partial, ReviewPartial):
-            raise ReviewInfraError(
-                ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
-                "Internal reviewer did not return ReviewPartial",
+        try:
+            partial = await gpt_client.review(
+                prompt[0],
+                prompt[1],
+                model=model,
+                tool_executor=tool_executor,
+                reasoning_effort=reasoning_effort,
+                max_completion_tokens=output_cap,
+                cost_ledger=ledger,
+                cost_stage=f"analysis-{index}",
+                response_model=ReviewPartial,
             )
-        _validate_partial(partial, expected_unit_id, expected_paths)
+            if not isinstance(partial, ReviewPartial):
+                raise ReviewInfraError(
+                    ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+                    "Internal reviewer did not return ReviewPartial",
+                )
+            _validate_partial(partial, expected_unit_id, expected_paths)
+        except ReviewInfraError as exc:
+            exc.stage = "analysis"
+            exc.unit_id = expected_unit_id
+            raise
         return partial
 
     tasks = [
@@ -642,23 +664,28 @@ async def run_review_pipeline(
         synthesis_system, synthesis_user = _synthesis_prompts(
             [reduced], plan.coverage.required_paths
         )
-        final = await gpt_client.review(
-            synthesis_system,
-            synthesis_user,
-            model=model,
-            tool_executor=None,
-            reasoning_effort=reasoning_effort,
-            max_completion_tokens=output_cap,
-            cost_ledger=ledger,
-            cost_stage="synthesis",
-            pre_reserved_call_id=synthesis_reservation_id,
-        )
-        if not isinstance(final, ReviewResult):
-            raise ReviewInfraError(
-                ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
-                "Synthesis did not return ReviewResult",
+        try:
+            final = await gpt_client.review(
+                synthesis_system,
+                synthesis_user,
+                model=model,
+                tool_executor=None,
+                reasoning_effort=reasoning_effort,
+                max_completion_tokens=output_cap,
+                cost_ledger=ledger,
+                cost_stage="synthesis",
+                pre_reserved_call_id=synthesis_reservation_id,
+                response_model=ReviewResult,
             )
-        _validate_synthesis_result(final, reduced)
+            if not isinstance(final, ReviewResult):
+                raise ReviewInfraError(
+                    ReviewInfraCategory.RESPONSE_SCHEMA_ERROR,
+                    "Synthesis did not return ReviewResult",
+                )
+            _validate_synthesis_result(final, reduced)
+        except ReviewInfraError as exc:
+            exc.stage = "synthesis"
+            raise
         return PipelineOutcome(result=final, ledger=ledger)
     except BaseException:
         for task in tasks:
